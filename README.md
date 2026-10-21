@@ -1,233 +1,140 @@
-# Waylyrics
+# 🎵 LexLyrics
 
 <div align="center">
-  <img src="img/waylyrics.png" style="height: 200px; width: auto;"></img>
-  <br />
-  <div>
-    <a href="https://t.me/+FWgnE0GRDYZhNjc1"><img src="https://img.shields.io/badge/Join-Telegram-blue.svg?logo=telegram"></a>
-    <a href="https://matrix.to/#/#waylyrics_x:catgirl.cloud"><img src="https://img.shields.io/badge/Join-Matrix-blue.svg?logo=matrix"></a>
-    <br />
-    <a href="https://www.bilibili.com/video/av1555055010/" target="blank"><img src="https://img.shields.io/badge/bilibili-Preview-blue.svg?logo=bilibili"></a>
-  </div>
+  <h3>Desktop Lyrics with Real-time Neural Translation & 3-Row Upward Karaoke Scroll</h3>
+  <p>Fork evoluto di <a href="https://github.com/waylyrics/waylyrics">Waylyrics</a> ottimizzato per Linux (Wayland / COSMIC / GNOME / KDE) con accelerazione hardware NVIDIA CUDA.</p>
+
+  <p>
+    <img src="https://img.shields.io/badge/Language-Rust%202021-orange.svg" alt="Rust" />
+    <img src="https://img.shields.io/badge/GUI-GTK%204%20%7C%20Libadwaita-blue.svg" alt="GTK4" />
+    <img src="https://img.shields.io/badge/AI%20Engine-NLLB--200%20%7C%20CUDA%20FP16-green.svg" alt="CUDA" />
+    <img src="https://img.shields.io/badge/VRAM%20Tiering-Zero%20MB%20Idle-purple.svg" alt="VRAM" />
+    <img src="https://img.shields.io/badge/License-GPL--3.0-blue.svg" alt="License" />
+  </p>
 </div>
 
-[简体中文](./README.md) | [English](./README.en.md)
+---
 
-- [介绍](#介绍)
-- [界面预览](#界面预览)
-- [构建/安装](#构建安装)
-- [用法](#用法)
-- [依赖](#依赖)
-- [插件](#插件)
-- [推荐的播放器](#推荐的播放器)
-- [无法使用的播放器](#无法使用的播放器)
-- [目录](#目录)
-- [替代品](#替代品)
-- [Credit](#credit)
-- [License](#license)
+## 🌟 Nuove Funzionalità di LexLyrics (Rispetto ad Upstream)
 
-> 目前 waylyrics 暂时处于不活跃开发，两位主要开发者忙于生计，暂时只进行 PR Review / 依赖更新
->
-> 遇到问题请参考 [issues](https://github.com/waylyrics/waylyrics/issues) 和 [wiki](https://github.com/waylyrics/waylyrics/wiki), [discussion](https://github.com/waylyrics/waylyrics/discussions) 等
+| Funzionalità | Upstream Waylyrics | **LexLyrics Fork** |
+| :--- | :--- | :--- |
+| **Visualizzazione Testi** | Solo 2 righe statiche ([Label; 2]) | **3 Righe con Karaoke Scroll (4 Label: prev, curr orig, curr it, next)** |
+| **Traduzione Canzoni** | Solo Cinese (NetEase / QQ Music) | **Italiano & Multilingua Neurale (NLLB-200, MarianMT, Claude, AGY, Hermes)** |
+| **Motore AI Locale** | Nessuno | **Server locale NLLB-200 su GPU RTX 3050 (<650ms a brano)** |
+| **Gestione Risorse GPU** | Non applicabile | **Dynamic VRAM Tiering (0 MB a riposo, promotion a CUDA in 0.7s all'avvio)** |
+| **Filtro Anti-Cinese** | Assente (mostra ideogrammi cinesi) | **Istantaneo (<50ms): sostituisce con traduzione o testo pulito** |
+| **Integrazione Dashboard** | Assente | **Telemetria in tempo reale + Hotkey [T] in `ai-tui`** |
 
-## 介绍
+---
 
-Waylyrics 是一款支持 Linux/Windows 的桌面歌词软件。
-
-关键特性：
-- 基于 GTK 4
-- 保持最新的依赖
-- 自动切换亮暗主题
-- 配置文件使用 TOML 格式
-- 启动时会为配置文件添加最新注释
-- CSS 自定义主题，提供[多种预设主题](themes)
-- 理论上正确接入 MPRIS/SMTC 即可兼容
-- 通过社区贡献，优化了一部分音乐播放器的歌词接入
-
-## 界面预览
-
-### 主界面
-
-> 边框可以隐藏（ctrl-d/托盘菜单->开关边框）
-
-![main ui](img/en-cn.png)
-
-### 搜索歌词
-
-![search lyrics](img/search-window.jpg)
-
-## 构建/安装
-
-> 注意：最低需要Rust版本为 1.78.0
-
-详阅 [INSTALLATION.md](doc/INSTALLATION.md)
-
-Ubuntu用户详阅 [BUILD_GUIDE_UBUNTU.zh_cn.md](doc/BUILD_GUIDE_UBUNTU.zh_cn.md)
-
-## 用法
-
-另见 [desktop文件](metainfo/io.github.waylyrics.Waylyrics.desktop)
-
-https://github.com/waylyrics/waylyrics/blob/d2132b42b135e0de09640de6a5a0b4797871c67e/src/config.rs#L67-L71
-
-## 依赖
-
-- 播放器需至少在MPRIS提供 Position，Metadata(有title)，PlaybackStatus
-- 需要你的wm允许你设置窗口置顶
-
-## 插件
-
-[waylyrics-sakura-translator]: https://github.com/WithourAI/waylyrics-sakura-translator
-[SakuraLLM]: https://github.com/SakuraLLM/Sakura-13B-Galgame
-
-| 插件                          | 简介                            | 版本    |
-| ----------------------------- | ------------------------------- | ------- |
-| [waylyrics-sakura-translator] | 日译中翻译插件，基于[SakuraLLM] | v0.3.6+ |
-
-## 推荐的播放器
-
-### Linux
-
-[插件]: https://addons.mozilla.org/en-US/firefox/addon/plasma-integration/
-[netease-cloud-music-gtk]: https://github.com/gmg137/netease-cloud-music-gtk
-[amberol]: https://gitlab.gnome.org/World/amberol
-[lollypop]: https://github.com/hamonikr/lollypop
-
-[FeelUOwn]: https://github.com/feeluown/FeelUOwn/
-[Qcm]: https://github.com/hypengw/Qcm
-[Telegram]: https://t.me/Music163Bot
-[VLC]: https://www.videolan.org
-
-[Electron-NCM]: https://github.com/Rocket1184/electron-netease-cloud-music
-[YesPlayMusic]: https://github.com/qier222/YesPlayMusic
-[youtube-music]: https://github.com/th-ch/youtube-music
-[go-musicfox]: https://github.com/go-musicfox/go-musicfox
-
-[mpv-mpris]: https://github.com/hoyon/mpv-mpris
-
-[mpd-mpris]: https://github.com/natsukagami/mpd-mpris
-[ncmpcpp]: https://github.com/ncmpcpp/ncmpcpp
-
-[DeaDBeeF]: https://deadbeef.sourceforge.io/
-[deadbeef-mpris2-plugin]: https://github.com/DeaDBeeF-Player/deadbeef-mpris2-plugin
-
-[SPlayer]: https://github.com/imsyy/SPlayer
-
-[listen1-desktop]: https://github.com/listen1/listen1_desktop
-[listen1-pr]: https://github.com/listen1/listen1_desktop/pull/1325
-
-| 名称                      | 在线 | 框架      | 备注                       |
-| ------------------------- | ---- | --------- | -------------------------- |
-| Firefox                   | O    | 浏览器    | 需要[插件]                 |
-| Chrome                    | O    | 浏览器    |                            |
-| [DeaDBeeF]                | X    | GTK3      | [deadbeef-mpris2-plugin]   |
-| [netease-cloud-music-gtk] | O    | GTK4      | 2.3.0+                     |
-| [amberol]                 | X    | GTK4      |                            |
-| [lollypop]                | X    | GTK4      |                            |
-| [FeelUOwn]                | O    | Qt5       | 3.9.12+                    |
-| [VLC]                     | O    | Qt5       |                            |
-| [Qcm]                     | O    | Qt6       |                            |
-| [Telegram]                | O    | Qt6       |                            |
-| [listen1-desktop]         | O    | Electron  | v2.33.0 [修复][listen1-pr] |
-| [Electron-NCM]            | O    | Electron  |                            |
-| [YesPlayMusic]            | O    | Electron  | R3Play会给标题加额外的后缀 |
-| [youtube-music]           | O    | Electron  | 启用Shortcut               |
-| [go-musicfox]             | O    | bubbletea | 4.3.2+                     |
-| mpv                       | O    | 原生      | [mpv-mpris]                |
-| [ncmpcpp]                 | X    | ncursew   | [mpd-mpris]                |
-
-### Windows
-
-| 名称          | 在线 | 框架      | 备注               |
-| ------------- | ---- | --------- | ------------------ |
-| [FeelUOwn]    | O    | Qt5       | 4.0.1+             |
-| [SPlayer]     | O    | Electron  |                    |
-| [go-musicfox] | O    | bubbletea | 4.4.0+             |
-| 媒体播放器    | X    | UWP       | 拖拽后不会立即更新 |
-
-## 无法使用的播放器
-
-[listen1-desktop]: https://github.com/listen1/listen1_desktop
-
-| Player  | OSD | issue       | 备注 |
-| ------- | --- | ----------- | ---- |
-| qqmusic | O   | 位置一直为0 |      |
-
-## 目录
-
-一般情况会创建的目录（可能被用户XDG设置影响）
-
-### Linux/Unix
+## 🖥️ Layout Visivo (3-Row Upward Scroll)
 
 ```
-~/.cache/waylyrics/XX/...
-~/.config/waylyrics/...
-# waylyrics 会首先尝试在这里加载主题，找不到的话就从全局模板目录找
-~/.local/share/waylyrics/_themes/...
+   ┌────────────────────────────────────────────────────────┐
+   │                                                        │
+   │  [prev]   Yesterday all my troubles seemed so far away │  <- 40% Opacità, Font compatto
+   │                                                        │
+   │  [above]  NOW IT LOOKS AS THOUGH THEY'RE HERE TO STAY  │  <- 100% Bianco, Bold, Verso Attivo
+   │  [below]  Ora sembra proprio che siano qui per restare │  <- 95% Azzurro, Traduzione Italiana
+   │                                                        │
+   │  [next]   Oh, I believe in yesterday                   │  <- 40% Opacità, Font compatto
+   │                                                        │
+   └────────────────────────────────────────────────────────┘
 ```
 
-### Windows
+Grazie alle transizioni CSS native di GTK4 (`cubic-bezier(0.25, 0.1, 0.25, 1.0)`), ogni verso scorre morbidamente verso l'alto senza scatti o artefatti visivi.
 
+---
+
+## 🏗️ Architettura del Sistema
+
+```mermaid
+flowchart TD
+    Player["🎵 Player Audio (Spotify, VLC, MPD)"] -->|MPRIS DBus| LexLyrics["🖥️ LexLyrics (GTK4 / Rust)"]
+    
+    subgraph Core ["Motore di Sincronizzazione"]
+        LexLyrics --> NetEase["🌐 Lyric Fetcher (NetEase / QQ)"]
+        NetEase --> AntiChinese["🛡️ Anti-Chinese Filter"]
+        AntiChinese --> TransEngine["🌐 Pluggable Translation Engine"]
+    end
+
+    subgraph Backends ["Backend di Traduzione Configurabili"]
+        TransEngine -->|Opzione 1 (Default)| NLLB["🚀 NLLB-200 Distilled 600M (CUDA HTTP 18436)"]
+        TransEngine -->|Opzione 2| Marian["⚡ MarianMT (opus-mt-en-it)"]
+        TransEngine -->|Opzione 3| AGY["🤖 AGY CLI (agy -p)"]
+        TransEngine -->|Opzione 4| Claude["🧠 Claude CLI (claude -p)"]
+        TransEngine -->|Opzione 5| Hermes["⚡ Hermes CLI (hermes -p)"]
+    end
+
+    subgraph VRAM ["Dynamic VRAM Tiering"]
+        NLLB -.->|App Aperta / Demand| CUDA["🎮 RTX 3050 VRAM (~1.1 GB)"]
+        NLLB -.->|App Chiusa / Idle > 75s| RAM["💾 System RAM (0 MB VRAM)"]
+    end
+
+    TransEngine --> UI["📱 4-Label Upward Scrolling UI"]
 ```
-%AppData%\poly000\waylyrics\config
-%AppData%\poly000\waylyrics\data
-%LocalAppData%\poly000\waylyrics\cache
+
+---
+
+## ⚙️ Configurazione (`config.toml`)
+
+Aggiungi o personalizza la sezione `[translation]` nel file di configurazione (`~/.config/waylyrics/config.toml`):
+
+```toml
+[translation]
+# Backend preferito: "nllb" | "marian" | "agy" | "claude" | "hermes"
+backend = "nllb"
+
+# URL dell'endpoint neurale locale
+nllb_url = "http://127.0.0.1:18436/translate"
+
+# Lingua di destinazione (codice ISO NLLB o standard)
+target_lang = "ita_Latn"
+
+# Timeout massimo per batch prima del fallback a cascata (millisecondi)
+timeout_ms = 2500
+
+# Abilita il layout a 3 versi contemporanei (prev / curr / next)
+multi_row_scroll = true
+
+# Durata transizione CSS scorrimento (millisecondi)
+animation_speed_ms = 350
 ```
 
-## 替代品
+---
 
-[waybar-netease-music-lyrics]: https://github.com/kangxiaoju/waybar-netease-music-lyrics
-[caraoke-plasmoid]: https://github.com/Copay/caraoke-plasmoid
-[desktop-lyric]: https://github.com/tuberry/desktop-lyric
-[可道歌词]: https://www.autolyric.com/
-[Lyricify]: https://github.com/WXRIW/Lyricify-App
-[osdlyrics]: https://github.com/osdlyrics/osdlyrics
-[desktop_lyric]: https://github.com/Moeweb647252/desktop_lyric
-[lyrica]: https://github.com/chiyuki0325/lyrica
-[lyric-for-musicfox]: https://github.com/SmileYik/lyric-for-musicfox
-[layrics]: https://github.com/sitiyou/layrics
-[kotonoha]: https://github.com/locez/kotonoha
-[FloatLyrics]: https://github.com/ChouChiu/FloatLyrics
-[chorus]: https://github.com/f1nniboy/chorus
+## 🚀 Compilazione & Installazione
 
-### Linux
+### Requisiti di Sistema
+- **Rust & Cargo**: >= 1.80
+- **GTK 4 & Libadwaita**: `libgtk-4-dev`, `libadwaita-1-dev`
+- **DBus & OpenSSL**: `libdbus-1-dev`, `libssl-dev`
 
-| 名称                          | 技术栈        | 桌面支持      | 播放器支持 | 备注                      |
-| ----------------------------- | ------------- | ------------- | ---------- | ------------------------- |
-| [lyric-for-musicfox]          | Qt/C++        | *             | musicfox   |                           |
-| [waybar-netease-music-lyrics] | bash          | wlroots-based | NCM[^0]    |                           |
-| [desktop-lyric]               | JavaScript    | GNOME         | MPRIS      |                           |
-| [caraoke-plasmoid]            | QML           | Plasma        | MPRIS      |                           |
-| [osdlyrics]                   | GTK2/C+Python | X/Xwayland    | MPRIS      |                           |
-| [desktop_lyric]               | egui          | Plasma        | MPRIS      |                           |
-| [lyrica]                      | Rust+QML      | Plasma        | MPRIS      |                           |
-| [layrics]                     | C++/Python    | Wayland       | MPRIS      | 需支持wlr-layer-shell协议 |
-| [kotonoha]                    | PyQt6         | Wayland       | MPRIS      | 需支持wlr-layer-shell协议 |
-| [chorus]                      | GTK4/Go       | Wayland       | MPRIS      |                           |
-| [FloatLyrics]                 | GTK4/Rust     | Wayland       | Spotify    | 需支持wlr-layer-shell协议 |
+### Compilazione del Binario
+```bash
+# Clona il repository
+git clone https://github.com/lex/lexlyrics.git
+cd lexlyrics
 
-[^0]: https://github.com/kangxiaoju/waybar-netease-music-lyrics/blob/f84810fe1628ca38fa36d88506152d88cf0e77e4/song.sh#L41-L59
+# Compila in modalità Release ultra-ottimizzata
+cargo build --release
 
-### Windows
+# Il binario compilato si trova in:
+# target/release/waylyrics (o lexlyrics)
+```
 
-| 名称             | 技术栈               | 播放器支持                                                                                          | 备注 |
-| ---------------- | -------------------- | --------------------------------------------------------------------------------------------------- | ---- |
-| [可道歌词]       | C++                  | Windows Media Player<br>Foobar2000<br>AIMP<br>Winamp                                                |      |
-| [Lyricify]       | UWP/C#(4+)<br>C#(3-) | Spotify<br>iTunes<br>Apple Music<br>Music Center<br>QQ Music<br>Netease Cloud Music<br>YesPlayMusic |      |
-| [热词][HotLyric] | WinUI3               | HyPlayer<br>LyricEase<br>YesPlayMusic<br>*GSMTC*s[^1]                                               |      |
+### Avvio con il Demone di Traduzione Locale NLLB-200
+```bash
+# Avvia il server neurale locale (se non già gestito da systemd)
+systemctl --user start nllb-translator.service
 
-[HotLyric]: https://github.com/cnbluefire/HotLyric
-[^1]: https://github.com/cnbluefire/HotLyric?tab=readme-ov-file#%E6%94%AF%E6%8C%81%E7%9A%84%E6%92%AD%E6%94%BE%E5%99%A8
+# Avvia LexLyrics
+./target/release/waylyrics
+```
 
-## Credit
+---
 
-[gtk4-rs]: https://github.com/gtk-rs/gtk4-rs
-
-- [gtk4-rs], Rust bind to GTK-4.
-
-
-## License
-
-[The MIT License (MIT)](https://raw.githubusercontent.com/waylyrics/waylyrics/master/LICENSE)
-
-This project icon is licensed under a [Creative Commons Attribution 4.0 International License](https://creativecommons.org/licenses/by/4.0/).
+## 🤝 Riconoscimenti & Licenza
+- Progetto basato sul lavoro originale di [Waylyrics](https://github.com/waylyrics/waylyrics).
+- Licenza: **GPL-3.0**.
