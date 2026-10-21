@@ -101,19 +101,41 @@ pub fn refresh_lyric(window: &app::Window, paused: bool) {
                     LyricOwned::LineTimestamp(origin_lyric),
                     LyricOwned::LineTimestamp(translation_lyric),
                 ) => {
+                    let current_idx = origin_lyric
+                        .iter()
+                        .position(|l| l.start_time > elapsed)
+                        .unwrap_or(origin_lyric.len())
+                        .saturating_sub(1);
+
+                    let prev = if current_idx > 0 { origin_lyric.get(current_idx - 1) } else { None };
+                    let curr = origin_lyric.get(current_idx);
+                    let next = origin_lyric.get(current_idx + 1);
+
                     let translation =
                         crate::lyric_providers::utils::find_next_lyric(&elapsed, translation_lyric);
-                    let origin =
-                        crate::lyric_providers::utils::find_next_lyric(&elapsed, origin_lyric);
-                    set_lyric_with_mode(window, translation, origin);
+
+                    set_lyric(window, prev, "prev");
+                    set_lyric_with_mode(window, translation, curr);
+                    set_lyric(window, next, "next");
                 }
                 (LyricOwned::LineTimestamp(origin_lyric), _) => {
-                    let origin =
-                        crate::lyric_providers::utils::find_next_lyric(&elapsed, origin_lyric);
-                    set_lyric_with_mode(window, None, origin);
+                    let current_idx = origin_lyric
+                        .iter()
+                        .position(|l| l.start_time > elapsed)
+                        .unwrap_or(origin_lyric.len())
+                        .saturating_sub(1);
+
+                    let prev = if current_idx > 0 { origin_lyric.get(current_idx - 1) } else { None };
+                    let curr = origin_lyric.get(current_idx);
+                    let next = origin_lyric.get(current_idx + 1);
+
+                    set_lyric(window, prev, "prev");
+                    set_lyric_with_mode(window, None, curr);
+                    set_lyric(window, next, "next");
                 }
                 _ => (),
             }
         },
     );
 }
+

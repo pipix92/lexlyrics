@@ -13,9 +13,10 @@ pub mod config;
 pub mod log;
 pub mod lyric_providers;
 pub mod sync;
+pub mod translation;
 pub mod utils;
 
-pub const DEFAULT_TEXT: &str = "Waylyrics";
+pub const DEFAULT_TEXT: &str = "LexLyrics";
 pub const PACKAGE_NAME: &str = env!("CARGO_PKG_NAME");
 pub const APP_ID_FIXED: &str = "io.github.waylyrics.Waylyrics";
 pub static INSTANCE_NAME: OnceLock<String> = OnceLock::new();

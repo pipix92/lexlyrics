@@ -35,7 +35,7 @@ use waylyrics::{
 };
 
 use waylyrics::sync::*;
-use waylyrics::{glib_spawn, log};
+use waylyrics::{glib_spawn, tokio_spawn, log};
 
 use waylyrics::app::actions::init_ui_action_channel;
 #[cfg(feature = "tray-icon")]
@@ -219,7 +219,19 @@ fn build_ui(app: &Application) -> Result<()> {
         color_scheme,
         theme_dark_switch,
         respect_empty_line_as_gap,
+        start_fullscreen,
+        window_width,
+        window_height,
+        lyric_offset_x,
+        lyric_offset_y,
+        passthrough_by_default,
+        translation,
     } = config;
+
+    let nllb_url_wake = translation.nllb_url.clone();
+    tokio_spawn!(async move {
+        waylyrics::translation::wake_vram(&nllb_url_wake).await;
+    });
 
     #[cfg(feature = "tray-icon")]
     if show_tray_icon {
@@ -265,6 +277,12 @@ fn build_ui(app: &Application) -> Result<()> {
         layer_shell,
         #[cfg(feature = "layer-shell")]
         layer_shell_anchor,
+        start_fullscreen,
+        window_width,
+        window_height,
+        lyric_offset_x,
+        lyric_offset_y,
+        passthrough_by_default,
     );
 
     register_sync_task(

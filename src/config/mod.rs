@@ -163,7 +163,53 @@ pub struct Config {
     /// from showing the previous line while the original lyric is displaying a blank gap,
     /// ensuring that both lyrics maintain a consistent visual rhythm.
     pub respect_empty_line_as_gap: bool,
+
+    /// Start main window in fullscreen mode
+    pub start_fullscreen: bool,
+
+    /// Saved window width
+    pub window_width: Option<i32>,
+
+    /// Saved window height
+    pub window_height: Option<i32>,
+
+    /// X coordinate offset for lyrics-box
+    pub lyric_offset_x: i32,
+
+    /// Y coordinate offset for lyrics-box
+    pub lyric_offset_y: i32,
+
+    /// Whether mouse click-through is enabled by default at startup
+    pub passthrough_by_default: bool,
+
+    /// Neural translation backend settings
+    pub translation: TranslationConfig,
 }
+
+#[derive(Clone, Deserialize, Serialize, Debug, DocumentedFields)]
+#[serde(default)]
+pub struct TranslationConfig {
+    /// Preferred translation backend: "nllb", "marian", "agy", "claude", "hermes"
+    pub backend: String,
+    /// Local neural NLLB-200 HTTP server endpoint
+    pub nllb_url: String,
+    /// Target language code
+    pub target_lang: String,
+    /// Timeout in milliseconds before fallback
+    pub timeout_ms: u64,
+}
+
+impl Default for TranslationConfig {
+    fn default() -> Self {
+        Self {
+            backend: "nllb".into(),
+            nllb_url: "http://127.0.0.1:18436/translate".into(),
+            target_lang: "ita_Latn".into(),
+            timeout_ms: 2500,
+        }
+    }
+}
+
 
 /// check [GTK+'s official document](https://docs.gtk.org/gtk4/ctor.ShortcutTrigger.parse_string.html) for trigger format
 #[derive(Deserialize, Serialize, DocumentedFields)]
@@ -224,6 +270,13 @@ impl Default for Config {
             color_scheme: ColorScheme::default(),
             theme_dark_switch: false,
             respect_empty_line_as_gap: false,
+            start_fullscreen: false,
+            window_width: None,
+            window_height: None,
+            lyric_offset_x: 0,
+            lyric_offset_y: 0,
+            passthrough_by_default: false,
+            translation: TranslationConfig::default(),
         }
     }
 }

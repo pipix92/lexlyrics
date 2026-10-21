@@ -66,6 +66,15 @@ pub async fn fetch_lyric_cached(
                     tlyric: translation,
                     offset,
                 }) => {
+                    let translation = if match &translation {
+                        LyricOwned::LineTimestamp(lines) => lines.iter().any(|l| crate::translation::contains_chinese(&l.text)),
+                        _ => false,
+                    } {
+                        info!("Cache contained Chinese translation, discarding for auto-translation");
+                        LyricOwned::None
+                    } else {
+                        translation
+                    };
                     let dbus_conn = GTK_DBUS_CONNECTION
                         .with_borrow(|conn| conn.as_ref().cloned())
                         .expect("GApplication was not set");

@@ -145,9 +145,16 @@ fn set_lyric(origin: LyricOwned, translation: LyricOwned, title: &str, artists: 
         }
     }
 
-    if !matches!(translation, LyricOwned::LineTimestamp(_)) {
-        info!("No translated lyric for {} - {title}", artists,);
-    }
+    let translation = if match &translation {
+        LyricOwned::LineTimestamp(lines) => lines.iter().any(|l| crate::translation::contains_chinese(&l.text)),
+        _ => false,
+    } {
+        info!("Provider returned Chinese translation, discarding to display clean/translated lyrics");
+        LyricOwned::None
+    } else {
+        translation
+    };
+
     LYRIC.set(LyricState {
         origin,
         translation,

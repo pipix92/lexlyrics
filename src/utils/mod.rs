@@ -24,8 +24,10 @@ pub fn reset_lyric_labels(window: &Window, tip: Option<&str>) {
         }
     });
 
+    get_label(window, "prev").set_label("");
     get_label(window, "above").set_label(tip);
     get_label(window, "below").set_label("");
+    get_label(window, "next").set_label("");
 }
 
 pub fn parse_time(time: &str) -> Result<Duration, ParseError> {

@@ -17,12 +17,21 @@ columnview#search-window-column listview row {
   padding-bottom: 3px;
 }
 
+label#prev,
+label#next {
+  padding: 4px 10px;
+  color: hsla(0, 0%, 100%, 0.4);
+  font-size: 18px;
+  transition: all 350ms cubic-bezier(0.25, 0.1, 0.25, 1.0);
+}
+
 label#above,
 label#below {
   padding: 10px;
   color: hsl(0, 0%, 100%);
   background-color: hsla(0, 0%, 0%, 0.3);
   border-radius: 10px;
+  transition: all 350ms cubic-bezier(0.25, 0.1, 0.25, 1.0);
 }
 
 label#above {
