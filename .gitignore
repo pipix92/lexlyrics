@@ -8,3 +8,7 @@ dhat.out.*
 .envrc
 /.direnv
 /result
+
+# Release archives and packages
+*.deb
+*.tar.gz

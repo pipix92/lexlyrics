@@ -1,0 +1,14 @@
+FROM docker.io/library/debian:trixie-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    pkg-config \
+    libgtk-4-dev \
+    libglib2.0-dev \
+    libssl-dev \
+    libdbus-1-dev \
+    ca-certificates \
+    binutils \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace

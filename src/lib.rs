@@ -34,7 +34,7 @@ thread_local! {
 pub static LYRIC_PROVIDERS: OnceLock<Vec<&'static dyn LyricProvider>> = OnceLock::new();
 
 pub static MAIN_CONTEXT: LazyLock<MainContext> = LazyLock::new(gtk::glib::MainContext::default);
-static TOKIO_RUNTIME: LazyLock<tokio::runtime::Runtime> =
+pub static TOKIO_RUNTIME: LazyLock<tokio::runtime::Runtime> =
     LazyLock::new(|| tokio::runtime::Runtime::new().unwrap());
 
 #[macro_export]

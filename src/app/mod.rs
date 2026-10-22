@@ -203,10 +203,10 @@ fn get_labels(vbox: &gtk::Box) -> Option<[Label; 4]> {
     let mut labels = Vec::new();
     let mut child = vbox.first_child();
     while let Some(c) = child {
+        child = c.next_sibling();
         if let Ok(label) = c.downcast::<Label>() {
             labels.push(label);
         }
-        child = c.next_sibling();
     }
     if labels.len() == 4 {
         Some([labels[0].clone(), labels[1].clone(), labels[2].clone(), labels[3].clone()])
