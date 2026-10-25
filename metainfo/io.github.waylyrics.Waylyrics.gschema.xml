@@ -22,7 +22,7 @@
       <summary>lyric alignment mode</summary>
     </key>
     <key name="lyric-display-mode" type="s">
-      <default>"show_both"</default>
+      <default>"show_both_rev"</default>
       <summary>lyric display mode</summary>
     </key>
   </schema>

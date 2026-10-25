@@ -16,7 +16,7 @@ use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::Application;
 
-use super::{get_label, set_lyric_align};
+use super::{get_label, osd, set_lyric_align};
 
 pub fn register_switch_decoration(wind: &Window, trigger: &str) {
     let action = SimpleAction::new("switch-decoration", None);
@@ -93,6 +93,36 @@ pub fn register_set_lyric_align(wind: &Window) {
                 return;
             };
             set_lyric_align(&wind, align);
+        }
+    ));
+    wind.add_action(&action);
+}
+
+/// Put the lyrics back to their automatic spot (just above the dock) and
+/// forget the position remembered from the last `Alt` + mouse drag.
+pub fn register_reset_position(wind: &Window) {
+    let action = SimpleAction::new("reset-position", None);
+    action.connect_activate(clone!(
+        #[weak]
+        wind,
+        move |_, _| {
+            if wind.is_fullscreen() {
+                if let Some(lyrics_box) = wind.child().and_downcast::<gtk::Box>() {
+                    lyrics_box.set_halign(wind.imp().lyric_align.get().into());
+                    lyrics_box.set_valign(gtk::Align::End);
+                    lyrics_box.set_margin_start(0);
+                    lyrics_box.set_margin_top(0);
+                }
+            } else {
+                let (x, y) = osd::bottom_center(
+                    &wind,
+                    wind.width(),
+                    wind.height(),
+                    wind.imp().osd_dock_margin.get(),
+                );
+                osd::place(&wind, x, y);
+            }
+            crate::config::save_lyric_offset(0, 0);
         }
     ));
     wind.add_action(&action);

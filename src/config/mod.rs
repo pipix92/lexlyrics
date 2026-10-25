@@ -164,19 +164,36 @@ pub struct Config {
     /// ensuring that both lyrics maintain a consistent visual rhythm.
     pub respect_empty_line_as_gap: bool,
 
-    /// Start main window in fullscreen mode
+    /// Start main window as a fullscreen HUD instead of the compact OSD bar
+    ///
+    /// The default is the compact OSD bar: a borderless `window-width` x
+    /// `window-height` strip (1200x210) placed just above the dock, which can be dragged
+    /// anywhere with `Alt` + mouse drag.
+    ///
+    /// The fullscreen HUD covers the whole screen with a transparent surface
+    /// and positions the lyrics inside it instead.
     pub start_fullscreen: bool,
 
-    /// Saved window width
+    /// Width of the compact OSD bar
     pub window_width: Option<i32>,
 
-    /// Saved window height
+    /// Height of the compact OSD bar
     pub window_height: Option<i32>,
 
-    /// X coordinate offset for lyrics-box
+    /// Clearance left between the OSD bar and the bottom of the monitor
+    ///
+    /// Only used when `lyric-offset-x` and `lyric-offset-y` are both zero,
+    /// i.e. when the bar has never been dragged anywhere.
+    pub osd_dock_margin: i32,
+
+    /// Remembered position, written back on every `Alt` + mouse drag
+    ///
+    /// In OSD mode these are screen coordinates of the bar itself; in
+    /// fullscreen HUD mode they are the offsets of the lyrics inside the
+    /// fullscreen surface. Both zero means "place it for me".
     pub lyric_offset_x: i32,
 
-    /// Y coordinate offset for lyrics-box
+    /// see `lyric-offset-x`
     pub lyric_offset_y: i32,
 
     /// Whether mouse click-through is enabled by default at startup
@@ -270,12 +287,15 @@ impl Default for Config {
             color_scheme: ColorScheme::default(),
             theme_dark_switch: false,
             respect_empty_line_as_gap: false,
-            start_fullscreen: true,
-            window_width: None,
-            window_height: None,
+            start_fullscreen: false,
+            window_width: Some(1200),
+            window_height: Some(210),
+            osd_dock_margin: crate::app::osd::DEFAULT_DOCK_MARGIN,
             lyric_offset_x: 0,
             lyric_offset_y: 0,
-            passthrough_by_default: true,
+            // the OSD bar has to be grabbable to be dragged around;
+            // `Alt`+`p` turns click-through on once it sits where it should
+            passthrough_by_default: false,
             translation: TranslationConfig::default(),
         }
     }
@@ -316,6 +336,9 @@ fn default_filter_regexies() -> Vec<String> {
 
 mod merge;
 pub use merge::append_comments;
+
+mod persist;
+pub use persist::{save_bool, save_integers, save_lyric_offset};
 
 #[cfg(feature = "layer-shell")]
 mod layer_shell;

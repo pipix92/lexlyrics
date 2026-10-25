@@ -17,8 +17,9 @@ use tracing_subscriber::prelude::*;
 use tracing_subscriber::{fmt, Registry};
 
 use waylyrics::app::actions::{
-    register_reload_theme, register_set_display_mode, register_set_label, register_set_lyric_align,
-    register_switch_decoration, register_switch_passthrough, UIAction, UI_ACTION,
+    register_reload_theme, register_reset_position, register_set_display_mode, register_set_label,
+    register_set_lyric_align, register_switch_decoration, register_switch_passthrough, UIAction,
+    UI_ACTION,
 };
 use waylyrics::app::{self, build_main_window};
 
@@ -44,6 +45,14 @@ use waylyrics::tray_icon::start_tray_service;
 pub const THEME_PRESETS_DIR: Option<&str> = option_env!("WAYLYRICS_THEME_PRESETS_DIR");
 
 fn main() -> Result<glib::ExitCode> {
+    // GTK 4.18 crashes on COSMIC's Wayland DMABUF negotiation, and the OSD bar
+    // can only place itself through X11 anyway: default to XWayland unless the
+    // user picked a backend. Runs before any thread exists, as `set_var` needs.
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("GDK_BACKEND").is_none() {
+        std::env::set_var("GDK_BACKEND", "x11");
+    }
+
     #[cfg(feature = "i18n")]
     let i18n_result = {
         let textdomain = gettextrs::TextDomain::new(waylyrics::PACKAGE_NAME);
@@ -222,6 +231,7 @@ fn build_ui(app: &Application) -> Result<()> {
         start_fullscreen,
         window_width,
         window_height,
+        osd_dock_margin,
         lyric_offset_x,
         lyric_offset_y,
         passthrough_by_default,
@@ -229,6 +239,7 @@ fn build_ui(app: &Application) -> Result<()> {
     } = config;
 
     let nllb_url_wake = translation.nllb_url.clone();
+    let _ = waylyrics::sync::lyric::translate::TRANSLATION_CONFIG.set(translation);
     tokio_spawn!(async move {
         waylyrics::translation::wake_vram(&nllb_url_wake).await;
     });
@@ -280,6 +291,7 @@ fn build_ui(app: &Application) -> Result<()> {
         start_fullscreen,
         window_width,
         window_height,
+        osd_dock_margin,
         lyric_offset_x,
         lyric_offset_y,
         passthrough_by_default,
@@ -342,6 +354,7 @@ fn register_actions(
     register_switch_decoration(wind, &switch_decoration);
     register_switch_passthrough(wind, &switch_passthrough);
     register_set_label(wind);
+    register_reset_position(wind);
     register_reload_theme(app, wind, &reload_theme);
     register_search_lyric(app, wind, &search_lyric);
     register_remove_lyric(app, wind);

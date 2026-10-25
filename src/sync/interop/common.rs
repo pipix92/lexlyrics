@@ -30,13 +30,19 @@ pub async fn update_lyric(
 
     crate::sync::utils::clean_lyric(window);
 
-    if window.imp().cache_lyrics.get() {
+    let cache_lyrics = window.imp().cache_lyrics.get();
+    if cache_lyrics {
         cache::fetch_lyric_cached(track_meta, ignore_cache, window).await?
     } else {
         fetch::fetch_lyric(track_meta, window).await?
     };
 
     drop(_gaurd);
+
+    // outside the lock: translating a whole song takes a while, and the next
+    // track must not wait for it
+    glib::spawn_future_local(crate::sync::lyric::translate::translate_missing(cache_lyrics));
+
     Ok(())
 }
 

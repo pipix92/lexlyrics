@@ -61,6 +61,9 @@ pub async fn fetch_lyric_cached(
         if let Ok(lyric) = std::fs::read_to_string(&cache_path) {
             let cached_lyric: Result<LyricCache, _> = serde_json::from_str(&lyric);
             match cached_lyric {
+                Ok(LyricCache { olyric: origin, .. }) if !origin.has_lines() => {
+                    info!("cached lyric for {cache_path:?} has no lines, searching again");
+                }
                 Ok(LyricCache {
                     olyric: origin,
                     tlyric: translation,
@@ -124,6 +127,21 @@ pub async fn fetch_lyric_cached(
 
 /// Using olyric and tlyric inside LYRIC to update corresponding cache file.
 pub fn update_lyric_cache(cache_path: &Path) -> bool {
+    write_lyric_cache(cache_path, 0)
+}
+
+/// Like [`update_lyric_cache`], but keeps the offset already stored in the
+/// cache file, for when the lyric changes after the user may have tuned it.
+pub fn refresh_lyric_cache(cache_path: &Path) -> bool {
+    let offset = std::fs::read_to_string(cache_path)
+        .ok()
+        .and_then(|cache| serde_json::from_str::<LyricCache>(&cache).ok())
+        .map(|cache| cache.offset)
+        .unwrap_or(0);
+    write_lyric_cache(cache_path, offset)
+}
+
+fn write_lyric_cache(cache_path: &Path, offset: i64) -> bool {
     let cache_dir = cache_path.parent().unwrap();
     if let Err(e) = std::fs::create_dir_all(cache_dir) {
         error!("cannot create cache dir {cache_dir:?}: {e}");
@@ -136,7 +154,7 @@ pub fn update_lyric_cache(cache_path: &Path) -> bool {
              translation,
          }| {
             // do not cache empty lyric
-            if origin.is_none() && translation.is_none() {
+            if !origin.has_lines() && !translation.has_lines() {
                 return false;
             }
 
@@ -145,7 +163,7 @@ pub fn update_lyric_cache(cache_path: &Path) -> bool {
                 serde_json::to_string(&LyricCache {
                     olyric: origin.clone(),
                     tlyric: translation.clone(),
-                    offset: 0,
+                    offset,
                 })
                 .expect("cannot serialize lyrics!"),
             ) else {

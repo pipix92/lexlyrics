@@ -115,6 +115,14 @@ pub async fn fetch_lyric(track_meta: &TrackMeta, window: &app::Window) -> Result
                 let olyric = provider.parse_lyric(&lyric);
                 let tlyric = provider.parse_translated_lyric(&lyric);
 
+                if !olyric.has_lines() {
+                    info!(
+                        "{song_id} on {} has no timed lines, trying the next match",
+                        provider.unique_name()
+                    );
+                    continue;
+                }
+
                 info!(
                     "fetched {song_id} from {} with weight {weight}",
                     provider.unique_name()

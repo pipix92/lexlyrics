@@ -28,6 +28,7 @@ podman run --rm \
   -v /home/lex/.rustup:/root/.rustup:ro \
   -v "$ROOT_DIR:/workspace" \
   -w /workspace \
+  -e WAYLYRICS_THEME_PRESETS_DIR=/usr/share/lexlyrics/themes \
   lexlyrics-builder \
   bash -c 'export PATH="/root/.cargo/bin:$PATH"; cargo build --release'
 
@@ -44,6 +45,15 @@ fi
 cp "$ICON_SRC" "$PKG_DIR/usr/share/icons/hicolor/512x512/apps/lexlyrics.png"
 cp "$ICON_SRC" "$PKG_DIR/usr/share/pixmaps/lexlyrics.png"
 ln -sf lexlyrics.png "$PKG_DIR/usr/share/icons/hicolor/512x512/apps/io.github.waylyrics.Waylyrics.png"
+
+# tray icon: double music note, see scripts/make_tray_icon.py
+for icon in "$ROOT_DIR"/res/icons/hicolor/*/apps/lexlyrics-tray.*; do
+    rel="${icon#"$ROOT_DIR/res/icons/"}"
+    install -Dm644 "$icon" "$PKG_DIR/usr/share/icons/$rel"
+done
+
+# 2b. Customization TUI (opened from the tray icon)
+install -Dm755 "$ROOT_DIR/scripts/lexlyrics-theme" "$PKG_DIR/usr/bin/lexlyrics-theme"
 
 # 3. Themes
 cp -r "$ROOT_DIR/themes/"* "$PKG_DIR/usr/share/lexlyrics/themes/"
@@ -79,7 +89,8 @@ Version: 0.5.0-1
 Section: sound
 Priority: optional
 Architecture: amd64
-Depends: libgtk-4-1, libcairo2, libglib2.0-0, libssl3, libdbus-1-3
+Depends: libgtk-4-1, libcairo2, libglib2.0-0, libssl3, libdbus-1-3, libx11-6
+Recommends: python3 (>= 3.11), xwayland
 Maintainer: Lex <lex@debian-pc>
 Description: LexLyrics - Desktop Karaoke Lyrics for Linux with Neural Offline Translation
  Fork avanzato di Waylyrics per Debian/Linux.
@@ -88,8 +99,9 @@ Description: LexLyrics - Desktop Karaoke Lyrics for Linux with Neural Offline Tr
   - Traduzione neurale offline multilingue NLLB-200 (Meta 600M)
   - VRAM tiering dinamico con accelerazione CUDA RTX 3050
   - Filtro anti-cinese automatico su LRCLib e NetEase
-  - Dimensioni a schermo intero con persistenza coordinate
-  - Modalita passthrough e spostamento con Alt+Mouse Drag
+  - Barra OSD compatta sopra la dock (default) o HUD a schermo intero
+  - Spostamento con Alt+Mouse Drag, posizione ricordata in config.toml
+  - Icona tray a doppia nota con personalizzazione di testo e finestra
   - Icona cosmica con Mononoki Nerd Font
 EOF
 
@@ -118,6 +130,8 @@ TAR_TMP="/tmp/lexlyrics-v0.5.0-linux-x86_64"
 rm -rf "$TAR_TMP"
 mkdir -p "$TAR_TMP"
 cp "$PKG_DIR/usr/bin/lexlyrics" "$TAR_TMP/"
+cp "$PKG_DIR/usr/bin/lexlyrics-theme" "$TAR_TMP/"
+cp -r "$ROOT_DIR/res/icons" "$TAR_TMP/icons"
 cp -r "$PKG_DIR/usr/share/lexlyrics/themes" "$TAR_TMP/"
 cp "$ICON_SRC" "$TAR_TMP/lexlyrics.png"
 cp "$PKG_DIR/usr/share/applications/lexlyrics.desktop" "$TAR_TMP/"

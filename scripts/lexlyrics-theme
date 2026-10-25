@@ -1,0 +1,572 @@
+#!/usr/bin/env python3
+"""lexlyrics-theme — personalizza testo e finestra di LexLyrics (TUI).
+
+Erede di `waylyrics-theme` (che puntava al Flatpak di Waylyrics), riscritto
+per LexLyrics nativo. Si apre anche dall'icona ♫ nel tray (clic sinistro o
+"Personalizza testo e finestra…").
+
+Testo   → genera  ~/.local/share/waylyrics/_themes/lexlyrics-custom.css
+          (tema base + override font/dimensioni/colori/barra OSD), imposta
+          theme = "lexlyrics-custom" e ricarica a caldo via D-Bus.
+Finestra→ modifica config.toml (modalità OSD/HUD, dimensioni, distanza dalla
+          dock, click-through, posizione) preservando i commenti.
+
+Uso:  lexlyrics-theme                   TUI interattiva
+      lexlyrics-theme --reload          solo hot-reload del tema corrente
+      lexlyrics-theme --print           stampa il CSS che verrebbe generato
+      lexlyrics-theme --reset-position  riporta la barra sopra la dock
+"""
+from __future__ import annotations
+
+import curses
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tomllib
+from pathlib import Path
+
+APP_ID = "io.github.waylyrics.Waylyrics"
+XDG_CONFIG = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+XDG_DATA = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share")
+# LexLyrics usa ProjectDirs("io","poly000","waylyrics")
+CONFIG = XDG_CONFIG / "waylyrics/config.toml"
+USER_THEMES = XDG_DATA / "waylyrics/_themes"
+SYSTEM_THEMES = [
+    Path("/usr/share/lexlyrics/themes"),
+    Path(__file__).resolve().parent.parent / "themes",  # avviato dal repo
+]
+CUSTOM = "lexlyrics-custom"
+MARK = "/* lexlyrics-theme:"
+LAUNCHERS = [Path.home() / ".local/bin/lexlyrics", Path("/usr/bin/lexlyrics")]
+PROCESS_NAMES = ["lexlyrics-bin", "lexlyrics"]
+
+DISPLAY_MODES = ["show_both", "show_both_rev", "origin", "prefer_translation"]
+DISPLAY_LABELS = {
+    "show_both": "Entrambe (traduzione sopra, originale sotto)",
+    "show_both_rev": "Entrambe (originale sopra, traduzione sotto)",
+    "origin": "Solo originale",
+    "prefer_translation": "Solo traduzione (fallback originale)",
+}
+BACKENDS = ["nllb", "marian", "claude", "agy", "hermes"]
+BACKEND_LABELS = {
+    "nllb": "NLLB-200 locale (GPU, :18436)",
+    "marian": "MarianMT offline (CPU, on-demand)",
+    "claude": "claude -p",
+    "agy": "agy -p",
+    "hermes": "hermes -p",
+}
+COLOR_PRESETS = ["#ffffff", "#e0e0e0", "#38bdf8", "#7aa2f7", "#9ece6a", "#bb9af7", "#a855f7",
+                 "#f7768e", "#e0af68", "#34f5ff"]
+DEFAULTS = {
+    "base": "lexlyrics-karaoke",
+    "font": "Mononoki Nerd Font",
+    "size": 32,              # riga originale; le altre scalano in proporzione
+    "color": "#ffffff",      # riga originale
+    "trans_color": "#38bdf8",  # riga tradotta
+    "side_opacity": 55,      # righe precedente/successiva
+    "bar_opacity": 55,       # sfondo vetro della barra OSD (0 = invisibile)
+    "bar_radius": 18,
+    "accent": "#38bdf8",     # bordo della barra OSD
+}
+# chiavi di config.toml (top-level) con i default di LexLyrics
+WINDOW_DEFAULTS = {
+    "start-fullscreen": False,
+    "window-width": 1200,
+    "window-height": 210,
+    "osd-dock-margin": 64,
+    "passthrough-by-default": False,
+    "lyric-offset-x": 0,
+    "lyric-offset-y": 0,
+}
+
+
+# ---------------------------------------------------------------- helpers
+def run(cmd: list[str], timeout: float = 5) -> subprocess.CompletedProcess | None:
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def list_themes() -> dict[str, Path]:
+    """nome -> percorso. I temi utente sovrascrivono quelli di sistema (come LexLyrics)."""
+    out: dict[str, Path] = {}
+    for d in (*SYSTEM_THEMES, USER_THEMES):
+        if d.is_dir():
+            for f in sorted(d.glob("*.css")):
+                if not f.stem.startswith(CUSTOM) and not f.stem.endswith("-dark"):
+                    out[f.stem] = f
+    return dict(sorted(out.items()))
+
+
+def list_fonts() -> list[str]:
+    r = run(["fc-list", ":", "family"])
+    fams = set()
+    if r and r.returncode == 0:
+        for line in r.stdout.splitlines():
+            fams.update(x.strip() for x in line.split(",") if x.strip())
+    pref = [f for f in sorted(fams) if "mononoki" in f.lower()]
+    return pref + [f for f in sorted(fams, key=str.lower) if f not in pref]
+
+
+def load_state() -> dict:
+    st = dict(DEFAULTS)
+    f = USER_THEMES / f"{CUSTOM}.css"
+    if f.exists():
+        first = f.read_text(errors="ignore").split("\n", 1)[0]
+        if first.startswith(MARK):
+            try:
+                st.update(json.loads(first[len(MARK):].rstrip(" */")))
+            except json.JSONDecodeError:
+                pass
+    return st
+
+
+def rgba(hexcol: str, pct: int) -> str:
+    h = hexcol.lstrip("#")
+    r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+    return f"rgba({r}, {g}, {b}, {pct / 100:.2f})"
+
+
+def valid_hex(s: str) -> bool:
+    return bool(re.fullmatch(r"#?[0-9a-fA-F]{6}", s.strip()))
+
+
+def build_css(st: dict, themes: dict[str, Path]) -> str:
+    base = themes.get(st["base"])
+    base_css = base.read_text(errors="ignore") if base else "/* tema base non trovato */"
+    size = int(st["size"])
+    below, side = max(8, round(size * 27 / 32)), max(8, round(size * 21 / 32))
+    bar = int(st["bar_opacity"])
+    meta = {k: st[k] for k in DEFAULTS}
+    if bar > 0:
+        bar_css = (f"  background-color: rgba(10, 14, 28, {bar / 100:.2f});\n"
+                   f"  border-color: {rgba(st['accent'], 30)};\n")
+    else:
+        bar_css = ("  background-color: transparent;\n"
+                   "  border-color: transparent;\n"
+                   "  box-shadow: none;\n")
+    return (
+        f"{MARK} {json.dumps(meta, ensure_ascii=False)} */\n"
+        f"/* Generato da lexlyrics-theme — base: {st['base']} — non modificare a mano */\n\n"
+        f"{base_css.rstrip()}\n\n/* ---- override lexlyrics-theme ---- */\n"
+        "label#prev,\nlabel#above,\nlabel#below,\nlabel#next {\n"
+        f"  font-family: \"{st['font']}\";\n"
+        "}\n\n"
+        f"label#above {{\n  font-size: {size}px;\n  color: {st['color']};\n}}\n\n"
+        f"label#below {{\n  font-size: {below}px;\n  color: {st['trans_color']};\n}}\n\n"
+        "label#prev,\nlabel#next {\n"
+        f"  font-size: {side}px;\n  color: {rgba(st['color'], int(st['side_opacity']))};\n"
+        "}\n\n"
+        f"window.osd-mode #lyrics-box {{\n{bar_css}"
+        f"  border-radius: {int(st['bar_radius'])}px;\n}}\n"
+    )
+
+
+def write_theme(css: str) -> None:
+    USER_THEMES.mkdir(parents=True, exist_ok=True)
+    for suffix in ("", "-dark"):  # -dark serve se theme-dark-switch = true
+        tmp = USER_THEMES / f".{CUSTOM}{suffix}.css.tmp"
+        tmp.write_text(css)
+        tmp.replace(USER_THEMES / f"{CUSTOM}{suffix}.css")  # atomico: niente CSS a metà durante il reload
+
+
+# ---------------------------------------------------------------- config.toml
+def read_config() -> dict:
+    try:
+        return tomllib.loads(CONFIG.read_text())
+    except (OSError, tomllib.TOMLDecodeError):
+        return {}
+
+
+def toml_literal(value) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    return json.dumps(str(value), ensure_ascii=False)  # stringa TOML base, escape compatibili
+
+
+HEADER_RE = r"(?m)^\[[^\]\n]+\][ \t]*$"
+
+
+def set_config(key: str, value, table: str | None = None) -> None:
+    """Modifica una sola chiave preservando i commenti che LexLyrics rigenera."""
+    txt = CONFIG.read_text() if CONFIG.exists() else ""
+    line = f"{key} = {toml_literal(value)}"
+    headers = list(re.finditer(HEADER_RE, txt))
+
+    if table is None:  # solo la zona top-level, prima della prima [tabella]
+        start, end = 0, headers[0].start() if headers else len(txt)
+    else:
+        own = next((h for h in headers if h.group().strip() == f"[{table}]"), None)
+        if own is None:
+            txt = txt.rstrip() + f"\n\n[{table}]\n"
+            headers = list(re.finditer(HEADER_RE, txt))
+            own = headers[-1]
+        nxt = next((h for h in headers if h.start() > own.start()), None)
+        start, end = own.end(), nxt.start() if nxt else len(txt)
+
+    region = txt[start:end]
+    new_region, n = re.subn(rf"(?m)^{re.escape(key)}\s*=.*$", line, region, count=1)
+    if n == 0:  # chiave assente: in coda alla sua zona
+        body = region.rstrip("\n")
+        new_region = (body + "\n" if body else ("\n" if table else "")) + line + "\n\n"
+    new = txt[:start] + new_region + txt[end:]
+
+    tomllib.loads(new)  # valida prima di scrivere
+    bak = CONFIG.with_suffix(".toml.bak")
+    if CONFIG.exists() and not bak.exists():
+        shutil.copy2(CONFIG, bak)
+    CONFIG.parent.mkdir(parents=True, exist_ok=True)
+    tmp = CONFIG.with_suffix(".toml.tmp")
+    tmp.write_text(new)
+    tmp.replace(CONFIG)
+
+
+# ---------------------------------------------------------------- D-Bus / processo
+def bus_names() -> list[str]:
+    r = run(["gdbus", "call", "--session", "--dest", "org.freedesktop.DBus",
+             "--object-path", "/org/freedesktop/DBus", "--method", "org.freedesktop.DBus.ListNames"])
+    if r and r.returncode == 0:
+        names = re.findall(r"'([^']+)'", r.stdout)
+    else:
+        r = run(["busctl", "--user", "list", "--no-legend", "--acquired"])
+        names = [ln.split()[0] for ln in r.stdout.splitlines()] if r and r.returncode == 0 else []
+    return [n for n in names if n.startswith(APP_ID)]
+
+
+def obj_path(name: str) -> str:
+    return "/" + name.replace(".", "/").replace("-", "_")
+
+
+def activate(name: str, path: str, action: str, arg: str | None = None) -> bool:
+    gv = f"[<'{arg}'>]" if arg is not None else "[]"
+    r = run(["gdbus", "call", "--session", "--dest", name, "--object-path", path,
+             "--method", "org.gtk.Actions.Activate", action, gv, "{}"])
+    if r and r.returncode == 0:
+        return True
+    cmd = ["busctl", "--user", "call", name, path, "org.gtk.Actions", "Activate", "sava{sv}", action]
+    cmd += ["1", "s", arg, "0"] if arg is not None else ["0", "0"]
+    r = run(cmd)
+    return bool(r and r.returncode == 0)
+
+
+def reload_theme() -> str:
+    names = bus_names()
+    if not names:
+        return "LexLyrics non in esecuzione: il tema verrà applicato al prossimo avvio."
+    ok = sum(activate(n, obj_path(n), "reload-theme") for n in names)
+    return f"Tema ricaricato a caldo ({ok}/{len(names)} istanze)." if ok else "Reload D-Bus fallito (serve gdbus o busctl)."
+
+
+def window_action(action: str, arg: str | None = None) -> int:
+    return sum(activate(n, obj_path(n) + "/window/1", action, arg) for n in bus_names())
+
+
+def set_display_mode(mode: str) -> str:
+    if not bus_names():
+        return "LexLyrics non in esecuzione."
+    ok = window_action("set-display-mode", mode)
+    return f"Modalità righe '{mode}' applicata (ricordata alla chiusura)." if ok else "Cambio modalità fallito."
+
+
+def reset_position() -> str:
+    set_config("lyric-offset-x", 0)
+    set_config("lyric-offset-y", 0)
+    if bus_names() and window_action("reset-position"):
+        return "Barra riportata sopra la dock."
+    return "Posizione azzerata: la barra tornerà sopra la dock al prossimo avvio."
+
+
+def restart_lexlyrics() -> str:
+    for name in PROCESS_NAMES:
+        run(["pkill", "-x", name])
+    launcher = next((p for p in LAUNCHERS if p.is_file()), None)
+    if launcher is None:
+        return "Launcher lexlyrics non trovato."
+    try:
+        subprocess.Popen([str(launcher)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+        return "LexLyrics riavviato."
+    except OSError as e:
+        return f"Riavvio fallito: {e}"
+
+
+# ---------------------------------------------------------------- TUI
+HEADER = "header"
+
+
+class TUI:
+    def __init__(self, scr):
+        self.scr = scr
+        self.themes = list_themes()
+        self.fonts = list_fonts() or [DEFAULTS["font"]]
+        self.st = load_state()
+        self.msg = f"Tema attivo in config: {read_config().get('theme', '?')}"
+        self.dirty = False            # tema modificato e non salvato
+        self.restart_needed = False   # finestra modificata: serve un riavvio
+        curses.curs_set(0)
+        curses.use_default_colors()
+        curses.init_pair(1, curses.COLOR_CYAN, -1)
+        curses.init_pair(2, curses.COLOR_BLACK, curses.COLOR_CYAN)
+        curses.init_pair(3, curses.COLOR_GREEN, -1)
+        curses.init_pair(4, curses.COLOR_MAGENTA, -1)
+
+    # valori correnti della finestra: config.toml è la fonte di verità
+    def win(self, key):
+        return read_config().get(key, WINDOW_DEFAULTS[key])
+
+    def items(self):
+        s, cfg = self.st, read_config()
+        backend = cfg.get("translation", {}).get("backend", "nllb")
+        mode = "HUD schermo intero" if self.win("start-fullscreen") else "Barra OSD compatta"
+        ox, oy = self.win("lyric-offset-x"), self.win("lyric-offset-y")
+        pos = "automatica (sopra la dock)" if (ox, oy) == (0, 0) else f"{ox}, {oy}"
+        return [
+            ("♫ Testo", "", HEADER),
+            ("Tema base", s["base"], self.pick_theme),
+            ("Font", s["font"], self.pick_font),
+            ("Dimensione (px)", f"{s['size']}  (traduzione e anteprime in proporzione)", self.pick_size),
+            ("Colore originale", s["color"], lambda: self.pick_color("color", "Colore riga originale")),
+            ("Colore traduzione", s["trans_color"], lambda: self.pick_color("trans_color", "Colore riga tradotta")),
+            ("Opacità righe vicine", f"{s['side_opacity']}%", lambda: self.pick_int("side_opacity", "Opacità righe precedente/successiva", 0, 100)),
+            ("Modalità righe", "originale / traduzione (applicata subito)", self.pick_mode),
+            ("Salva tema e ricarica", "", self.save),
+            ("▭ Barra OSD", "", HEADER),
+            ("Sfondo vetro", f"{s['bar_opacity']}%" if int(s["bar_opacity"]) else "invisibile", lambda: self.pick_int("bar_opacity", "Opacità sfondo barra (0 = invisibile)", 0, 100)),
+            ("Arrotondamento (px)", str(s["bar_radius"]), lambda: self.pick_int("bar_radius", "Raggio angoli", 0, 60)),
+            ("Colore bordo", s["accent"], lambda: self.pick_color("accent", "Colore bordo barra")),
+            ("⧉ Finestra", "", HEADER),
+            ("Modalità", mode, self.pick_window_mode),
+            ("Larghezza barra (px)", str(self.win("window-width")), lambda: self.pick_window_int("window-width", "Larghezza barra", 320, 7680)),
+            ("Altezza barra (px)", str(self.win("window-height")), lambda: self.pick_window_int("window-height", "Altezza barra", 120, 2160)),
+            ("Distanza dalla dock (px)", str(self.win("osd-dock-margin")), lambda: self.pick_window_int("osd-dock-margin", "Distanza dal bordo inferiore", 0, 1000)),
+            ("Click-through all'avvio", "sì" if self.win("passthrough-by-default") else "no  (Alt+P lo attiva al volo)", self.toggle_passthrough),
+            ("Posizione", pos, self.do_reset_position),
+            ("⇄ Traduzione", "", HEADER),
+            ("Backend", f"{backend} — {BACKEND_LABELS.get(backend, '?')}", self.pick_backend),
+            ("", "", HEADER),
+            ("Riavvia LexLyrics", "  ⟳ richiesto" if self.restart_needed else "", self.restart),
+            ("Esci", "", None),
+        ]
+
+    def selectable(self, items, i):
+        return items[i][2] is not HEADER
+
+    def draw(self, sel):
+        self.scr.erase()
+        h, w = self.scr.getmaxyx()
+        title = "lexlyrics-theme ♫" + (" *" if self.dirty else "")
+        self.scr.addnstr(0, 2, title, w - 3, curses.color_pair(1) | curses.A_BOLD)
+        items = self.items()
+        rows = max(1, h - 4)
+        top = max(0, min(sel - rows // 2, len(items) - rows))
+        for i, (k, v, fn) in enumerate(items[top:top + rows]):
+            idx = top + i
+            if fn is HEADER:
+                self.scr.addnstr(2 + i, 2, k, w - 4, curses.color_pair(4) | curses.A_BOLD)
+                continue
+            attr = curses.color_pair(2) if idx == sel else 0
+            self.scr.addnstr(2 + i, 2, f"   {k:<26} {v} ".ljust(w - 4), w - 4, attr)
+        self.scr.addnstr(h - 2, 2, self.msg, w - 4, curses.color_pair(3))
+        self.scr.addnstr(h - 1, 2, "↑↓ muovi  Invio scegli  s salva tema  r riavvia  q esci", w - 4, curses.A_DIM)
+        self.scr.refresh()
+
+    def menu(self, title, options, current=None, filterable=False):
+        sel = options.index(current) if current in options else 0
+        query, top = "", 0
+        while True:
+            opts = [o for o in options if query.lower() in o.lower()] if query else options
+            sel = min(sel, max(0, len(opts) - 1))
+            h, w = self.scr.getmaxyx()
+            rows = max(1, h - 5)
+            top = min(max(top, sel - rows + 1), sel)
+            self.scr.erase()
+            head = title + (f"  filtro: {query}_" if filterable else "")
+            self.scr.addnstr(0, 2, head, w - 3, curses.color_pair(1) | curses.A_BOLD)
+            for i, o in enumerate(opts[top:top + rows]):
+                attr = curses.color_pair(2) if top + i == sel else 0
+                self.scr.addnstr(2 + i, 2, f" {o} ".ljust(w - 4), w - 4, attr)
+            hint = "digita per filtrare  " if filterable else ""
+            self.scr.addnstr(h - 1, 2, hint + "Invio conferma  Esc annulla", w - 4, curses.A_DIM)
+            self.scr.refresh()
+            c = self.scr.get_wch()
+            if c in (curses.KEY_UP, "k") and not (filterable and c == "k"):
+                sel = max(0, sel - 1)
+            elif c in (curses.KEY_DOWN, "j") and not (filterable and c == "j"):
+                sel = min(len(opts) - 1, sel + 1)
+            elif c == curses.KEY_PPAGE:
+                sel = max(0, sel - rows)
+            elif c == curses.KEY_NPAGE:
+                sel = min(len(opts) - 1, sel + rows)
+            elif c in ("\n", curses.KEY_ENTER):
+                return opts[sel] if opts else None
+            elif c == "\x1b":
+                return None
+            elif filterable and c in (curses.KEY_BACKSPACE, "\x7f", "\b"):
+                query = query[:-1]
+            elif filterable and isinstance(c, str) and c.isprintable():
+                query, sel = query + c, 0
+
+    def prompt(self, label, default=""):
+        h, w = self.scr.getmaxyx()
+        curses.curs_set(1)
+        curses.echo()
+        self.scr.move(h - 2, 0)
+        self.scr.clrtoeol()
+        text = f"{label} [{default}]: "
+        self.scr.addnstr(h - 2, 2, text, w - 4)
+        try:
+            s = self.scr.getstr(h - 2, min(w - 2, 2 + len(text)), 20).decode().strip()
+        finally:
+            curses.noecho()
+            curses.curs_set(0)
+        return s or default
+
+    # ---- testo
+    def set(self, key, val):
+        if val is not None and val != self.st[key]:
+            self.st[key], self.dirty = val, True
+
+    def pick_theme(self):
+        self.set("base", self.menu("Tema base", list(self.themes), self.st["base"]))
+
+    def pick_font(self):
+        self.set("font", self.menu("Font di sistema", self.fonts, self.st["font"], filterable=True))
+
+    def pick_size(self):
+        self.pick_int("size", "Dimensione riga originale px", 8, 120)
+
+    def pick_int(self, key, label, lo, hi):
+        s = self.prompt(f"{label} ({lo}-{hi})", str(self.st[key]))
+        try:
+            v = int(s)
+            assert lo <= v <= hi
+            self.set(key, v)
+        except (ValueError, AssertionError):
+            self.msg = "Valore non valido."
+
+    def pick_color(self, key, label):
+        c = self.menu(label, COLOR_PRESETS + ["personalizzato…"], self.st[key])
+        if c == "personalizzato…":
+            c = self.prompt("Hex #rrggbb", self.st[key])
+            if not valid_hex(c):
+                self.msg = "Colore non valido."
+                return
+            c = "#" + c.strip().lstrip("#").lower()
+        self.set(key, c)
+
+    def pick_mode(self):
+        labels = [f"{m}  — {DISPLAY_LABELS[m]}" for m in DISPLAY_MODES]
+        r = self.menu("Modalità righe (applicata subito)", labels)
+        if r:
+            self.msg = set_display_mode(r.split()[0])
+
+    def save(self):
+        write_theme(build_css(self.st, self.themes))
+        self.dirty = False
+        if read_config().get("theme") != CUSTOM:
+            set_config("theme", CUSTOM)
+            # LexLyrics risolve il file tema solo all'avvio: serve un riavvio una tantum
+            self.restart_needed = True
+            if bus_names() and self.menu("Tema cambiato: riavviare LexLyrics ora?", ["Sì", "No"]) == "Sì":
+                self.restart()
+            else:
+                self.msg = f"Salvato. Riavvia LexLyrics una volta per attivare {CUSTOM}."
+        else:
+            self.msg = "Salvato. " + reload_theme()
+
+    # ---- finestra
+    def changed_window(self, what):
+        self.restart_needed = True
+        self.msg = f"{what} salvato in config.toml — premi r per riavviare e applicarlo."
+
+    def pick_window_mode(self):
+        opts = ["Barra OSD compatta (consigliata)", "HUD schermo intero"]
+        r = self.menu("Modalità finestra", opts, opts[1] if self.win("start-fullscreen") else opts[0])
+        if r:
+            set_config("start-fullscreen", r == opts[1])
+            self.changed_window("Modalità")
+
+    def pick_window_int(self, key, label, lo, hi):
+        s = self.prompt(f"{label} ({lo}-{hi})", str(self.win(key)))
+        try:
+            v = int(s)
+            assert lo <= v <= hi
+        except (ValueError, AssertionError):
+            self.msg = "Valore non valido."
+            return
+        if v != self.win(key):
+            set_config(key, v)
+            self.changed_window(label)
+
+    def toggle_passthrough(self):
+        set_config("passthrough-by-default", not self.win("passthrough-by-default"))
+        self.changed_window("Click-through")
+
+    def do_reset_position(self):
+        self.msg = reset_position()
+
+    def pick_backend(self):
+        labels = [f"{b}  — {BACKEND_LABELS[b]}" for b in BACKENDS]
+        r = self.menu("Backend di traduzione", labels)
+        if r:
+            set_config("backend", r.split()[0], table="translation")
+            self.changed_window("Backend")
+
+    def restart(self):
+        self.msg = restart_lexlyrics()
+        self.restart_needed = False
+
+    def loop(self):
+        items = self.items()
+        sel = next(i for i in range(len(items)) if self.selectable(items, i))
+        while True:
+            items = self.items()
+            self.draw(sel)
+            c = self.scr.get_wch()
+            if c in (curses.KEY_UP, "k", curses.KEY_DOWN, "j"):
+                step = -1 if c in (curses.KEY_UP, "k") else 1
+                nxt = (sel + step) % len(items)
+                while not self.selectable(items, nxt):
+                    nxt = (nxt + step) % len(items)
+                sel = nxt
+            elif c == "s":
+                self.save()
+            elif c == "r":
+                self.restart()
+            elif c in ("q", "\x1b") or (c in ("\n", curses.KEY_ENTER) and items[sel][2] is None):
+                if self.dirty and self.menu("Tema non salvato. Salvare?", ["Sì", "No"]) == "Sì":
+                    self.save()
+                if self.restart_needed and bus_names() and \
+                        self.menu("Applicare ora le modifiche (riavvio)?", ["Sì", "No"]) == "Sì":
+                    self.restart()
+                return
+            elif c in ("\n", curses.KEY_ENTER):
+                items[sel][2]()
+
+
+def main() -> int:
+    if "--reload" in sys.argv:
+        print(reload_theme())
+        return 0
+    if "--print" in sys.argv:
+        print(build_css(load_state(), list_themes()))
+        return 0
+    if "--reset-position" in sys.argv:
+        print(reset_position())
+        return 0
+    if not CONFIG.exists():
+        print(f"config.toml non trovato in {CONFIG}: avvia LexLyrics una volta.", file=sys.stderr)
+        return 1
+    os.environ.setdefault("ESCDELAY", "25")  # Esc reattivo
+    curses.wrapper(lambda scr: TUI(scr).loop())
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

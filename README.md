@@ -25,6 +25,34 @@
 | **Gestione Risorse GPU** | Non applicabile | **Dynamic VRAM Tiering (0 MB a riposo, promotion a CUDA in 0.7s all'avvio)** |
 | **Filtro Anti-Cinese** | Assente (mostra ideogrammi cinesi) | **Istantaneo (<50ms): sostituisce con traduzione o testo pulito** |
 | **Integrazione Dashboard** | Assente | **Telemetria in tempo reale + Hotkey [T] in `ai-tui`** |
+| **Finestra** | Finestra GTK classica | **Barra OSD compatta sopra la dock (default) o HUD a schermo intero** |
+| **Personalizzazione** | Modifica manuale dei CSS | **Icona tray ♫ → `lexlyrics-theme` (font, colori, barra, modalità, backend)** |
+
+---
+
+## 🪟 Modalità Finestra
+
+| Modalità | Cosa fa | Come si sposta |
+| :--- | :--- | :--- |
+| **Barra OSD compatta** *(default, `start-fullscreen = false`)* | Barra borderless `window-width` × `window-height` (1200×210) con sfondo vetro, piazzata in basso al centro a `osd-dock-margin` px (64) dal bordo, appena sopra la dock di COSMIC | `Alt` + trascinamento sposta l'intera barra; la posizione viene salvata in `lyric-offset-x` / `lyric-offset-y` |
+| **HUD a schermo intero** *(`start-fullscreen = true`)* | Superficie trasparente su tutto lo schermo, solo i testi in sovrimpressione | `Alt` + trascinamento sposta i testi dentro l'HUD; offset salvati negli stessi campi |
+
+- `lyric-offset-x = 0` e `lyric-offset-y = 0` significano "piazzala tu" (sopra la dock). Dal tray: **Modalità finestra → Riporta sopra la dock**.
+- Il click-through (`Alt+P`) rende la barra trasparente ai clic: attivalo *dopo* averla posizionata, altrimenti non si può trascinare. `passthrough-by-default = false` è il default.
+- LexLyrics usa XWayland (`GDK_BACKEND=x11`) di default: evita il crash DMABUF di GTK 4.18 su COSMIC ed è ciò che permette alla barra di posizionarsi da sola.
+
+## ♫ Icona Tray e `lexlyrics-theme`
+
+L'icona a doppia nota nel pannello apre (clic sinistro, o voce **Personalizza testo e finestra…**) la TUI `lexlyrics-theme`:
+
+- **Testo**: tema base, font, dimensione (traduzione e righe vicine in proporzione), colore originale, colore traduzione, opacità delle righe vicine, modalità righe.
+- **Barra OSD**: opacità dello sfondo vetro (0 = invisibile), raggio degli angoli, colore del bordo.
+- **Finestra**: modalità OSD/HUD, larghezza, altezza, distanza dalla dock, click-through all'avvio, reset posizione.
+- **Traduzione**: backend (`nllb`, `marian`, `claude`, `agy`, `hermes`).
+
+Il tema generato è `~/.local/share/waylyrics/_themes/lexlyrics-custom.css` e viene ricaricato a caldo via D-Bus; le modifiche alla finestra vanno in `config.toml` (commenti preservati) e si applicano con un riavvio (`r` nella TUI). Il terminale si sceglie con `LEXLYRICS_TERMINAL` (es. `LEXLYRICS_TERMINAL="cosmic-term -e"`), altrimenti il primo tra kitty, konsole, x-terminal-emulator, cosmic-term, xterm.
+
+Da riga di comando: `lexlyrics-theme --reload`, `--print`, `--reset-position`. L'icona si rigenera con `python3 scripts/make_tray_icon.py`.
 
 ---
 

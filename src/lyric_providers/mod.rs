@@ -39,6 +39,14 @@ pub enum LyricOwned {
     LineTimestamp(Vec<LyricLineOwned>),
 }
 
+impl LyricOwned {
+    /// a timed lyric with at least one non-blank line: providers sometimes
+    /// answer with a timed lyric that has nothing in it
+    pub fn has_lines(&self) -> bool {
+        matches!(self, Self::LineTimestamp(lines) if lines.iter().any(|l| !l.text.trim().is_empty()))
+    }
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct LyricLineOwned {
     pub text: String,

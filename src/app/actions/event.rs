@@ -23,6 +23,8 @@ pub enum UIAction {
     SetDisplayMode(String),
     /// set new lyric alignment mode
     SetLyricAlign(String),
+    /// put the lyrics back above the dock and forget the dragged position
+    ResetPosition,
     /// Quit Waylyrics
     Quit,
 }
@@ -69,6 +71,9 @@ fn register_ui_action(app: WeakRef<Application>, wind: WeakRef<Window>) -> Sende
                     "set-lyric-align",
                     Some(&lyric_align.to_variant()),
                 ),
+                UIAction::ResetPosition => {
+                    ActionGroupExt::activate_action(&wind, "reset-position", None)
+                }
                 UIAction::Quit => {
                     wind.close();
                 }

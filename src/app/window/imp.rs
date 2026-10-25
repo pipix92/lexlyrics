@@ -29,6 +29,9 @@ pub struct Window {
     pub respect_empty_line_as_gap: Cell<bool>,
     pub skip_auto_search: Cell<bool>,
 
+    /// clearance kept above the dock when the OSD bar is placed automatically
+    pub osd_dock_margin: Cell<i32>,
+
     pub lyric_start: Cell<Option<SystemTime>>,
     pub lyric_offset_ms: Cell<i64>,
     pub length_toleration_ms: Cell<u128>,

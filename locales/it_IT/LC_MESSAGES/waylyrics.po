@@ -213,3 +213,27 @@ msgstr "Fine"
 #: ../src/app/window/imp.rs:189 ../src/tray_icon/unix/mod.rs:77
 msgid "Fill"
 msgstr "Riempire"
+
+#: ../src/tray_icon/unix/mod.rs
+msgid "Click to customize text and window"
+msgstr "Clicca per personalizzare testo e finestra"
+
+#: ../src/tray_icon/unix/mod.rs
+msgid "Customize Text and Window…"
+msgstr "Personalizza testo e finestra…"
+
+#: ../src/tray_icon/unix/mod.rs
+msgid "Window Mode"
+msgstr "Modalità finestra"
+
+#: ../src/tray_icon/unix/mod.rs
+msgid "Compact OSD Bar"
+msgstr "Barra OSD compatta"
+
+#: ../src/tray_icon/unix/mod.rs
+msgid "Fullscreen HUD"
+msgstr "HUD a schermo intero"
+
+#: ../src/tray_icon/unix/mod.rs
+msgid "Move Back Above the Dock"
+msgstr "Riporta sopra la dock"
