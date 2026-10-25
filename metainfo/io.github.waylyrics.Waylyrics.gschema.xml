@@ -10,7 +10,7 @@
       <summary>Default window height</summary>
     </key>
     <key name="window-decorated" type="b">
-      <default>true</default>
+      <default>false</default>
       <summary>enable GTK+ CSD</summary>
     </key>
     <key name="window-click-through" type="b">

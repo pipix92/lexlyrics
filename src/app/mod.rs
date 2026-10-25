@@ -62,6 +62,7 @@ pub fn build_main_window(
 
     if start_fullscreen {
         window.fullscreen();
+        window.set_decorated(false);
     } else if let (Some(w), Some(h)) = (window_width, window_height) {
         window.set_default_size(w, h);
     } else {
@@ -113,7 +114,8 @@ pub fn build_main_window(
         .baseline_position(gtk::BaselinePosition::Center)
         .orientation(gtk::Orientation::Vertical)
         .halign(gtk::Align::Center)
-        .valign(gtk::Align::Center)
+        .valign(gtk::Align::End)
+        .margin_bottom(52)
         .vexpand(true)
         .hexpand(false)
         .build();

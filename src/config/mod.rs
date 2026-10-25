@@ -246,7 +246,7 @@ impl Default for Config {
             player_sync_interval: "2s".to_owned(),
             lyric_update_interval: "20ms".to_owned(),
             length_toleration: "2s".to_owned(),
-            theme: "default".into(),
+            theme: "lexlyrics-karaoke".into(),
             cache_lyrics: true,
             enable_filter_regex: false,
             enable_local_lyric: true,
@@ -270,12 +270,12 @@ impl Default for Config {
             color_scheme: ColorScheme::default(),
             theme_dark_switch: false,
             respect_empty_line_as_gap: false,
-            start_fullscreen: false,
+            start_fullscreen: true,
             window_width: None,
             window_height: None,
             lyric_offset_x: 0,
             lyric_offset_y: 0,
-            passthrough_by_default: false,
+            passthrough_by_default: true,
             translation: TranslationConfig::default(),
         }
     }

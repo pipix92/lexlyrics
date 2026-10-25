@@ -16,21 +16,20 @@ mkdir -p "$PKG_DIR/DEBIAN"
 mkdir -p "$PKG_DIR/usr/bin"
 mkdir -p "$PKG_DIR/usr/share/applications"
 mkdir -p "$PKG_DIR/usr/share/icons/hicolor/512x512/apps"
-mkdir -p "$PKG_DIR/usr/share/pixmaps"
 mkdir -p "$PKG_DIR/usr/share/lexlyrics/themes"
+mkdir -p "$PKG_DIR/usr/share/pixmaps"
 mkdir -p "$PKG_DIR/usr/share/doc/lexlyrics"
+mkdir -p "$PKG_DIR/usr/share/glib-2.0/schemas"
 
-# Ensure release binary exists
-if [ ! -f "$ROOT_DIR/target/release/lexlyrics" ]; then
-    echo "==> Release binary not found. Compiling in container..."
-    podman run --rm \
-      -v /home/lex/.cargo:/root/.cargo \
-      -v /home/lex/.rustup:/root/.rustup:ro \
-      -v "$ROOT_DIR:/workspace" \
-      -w /workspace \
-      lexlyrics-builder \
-      bash -c 'export PATH="/root/.cargo/bin:$PATH"; cargo build --release'
-fi
+# Compile release binary incrementally in container
+echo "==> Compiling release binary in container..."
+podman run --rm \
+  -v /home/lex/.cargo:/root/.cargo \
+  -v /home/lex/.rustup:/root/.rustup:ro \
+  -v "$ROOT_DIR:/workspace" \
+  -w /workspace \
+  lexlyrics-builder \
+  bash -c 'export PATH="/root/.cargo/bin:$PATH"; cargo build --release'
 
 # 1. Binary & Symlink
 cp "$ROOT_DIR/target/release/lexlyrics" "$PKG_DIR/usr/bin/lexlyrics"
@@ -71,6 +70,8 @@ cp "$PKG_DIR/usr/share/applications/lexlyrics.desktop" "$PKG_DIR/usr/share/appli
 cp "$ROOT_DIR/README.md" "$PKG_DIR/usr/share/doc/lexlyrics/"
 cp "$ROOT_DIR/LICENSE" "$PKG_DIR/usr/share/doc/lexlyrics/copyright"
 
+cp "$ROOT_DIR/metainfo/io.github.waylyrics.Waylyrics.gschema.xml" "$PKG_DIR/usr/share/glib-2.0/schemas/"
+
 # 6. Control File
 cat << "EOF" > "$PKG_DIR/DEBIAN/control"
 Package: lexlyrics
@@ -101,6 +102,9 @@ if [ -x /usr/bin/update-desktop-database ]; then
 fi
 if [ -x /usr/bin/gtk-update-icon-cache ]; then
     gtk-update-icon-cache -q /usr/share/icons/hicolor || true
+fi
+if [ -x /usr/bin/glib-compile-schemas ]; then
+    glib-compile-schemas /usr/share/glib-2.0/schemas || true
 fi
 exit 0
 EOF
