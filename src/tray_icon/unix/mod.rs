@@ -97,6 +97,29 @@ impl Tray for TrayIcon {
             }
             .into(),
             SubMenu {
+                label: gettext("Lines Before and After"),
+                icon_name: "format-justify-fill".into(),
+                submenu: [-1, 0, 1, 2, 3, 4, 5]
+                    .into_iter()
+                    .map(|count| {
+                        StandardItem {
+                            label: if count < 0 {
+                                gettext("Auto (fit the window)")
+                            } else {
+                                count.to_string()
+                            },
+                            activate: Box::new(move |_| {
+                                let _ = ui_action().send_blocking(UIAction::SetContextLines(count));
+                            }),
+                            ..Default::default()
+                        }
+                        .into()
+                    })
+                    .collect(),
+                ..Default::default()
+            }
+            .into(),
+            SubMenu {
                 label: gettext("Window Mode"),
                 icon_name: "view-restore".into(),
                 submenu: vec![
@@ -109,6 +132,25 @@ impl Tray for TrayIcon {
                     StandardItem {
                         label: gettext("Fullscreen HUD"),
                         activate: Box::new(|_| set_window_mode(true)),
+                        ..Default::default()
+                    }
+                    .into(),
+                    MenuItem::Separator,
+                    StandardItem {
+                        label: gettext("Bigger"),
+                        icon_name: "zoom-in".into(),
+                        activate: Box::new(|_| {
+                            let _ = ui_action().send_blocking(UIAction::Zoom(1.1));
+                        }),
+                        ..Default::default()
+                    }
+                    .into(),
+                    StandardItem {
+                        label: gettext("Smaller"),
+                        icon_name: "zoom-out".into(),
+                        activate: Box::new(|_| {
+                            let _ = ui_action().send_blocking(UIAction::Zoom(1.0 / 1.1));
+                        }),
                         ..Default::default()
                     }
                     .into(),

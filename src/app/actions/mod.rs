@@ -16,7 +16,7 @@ use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::Application;
 
-use super::{get_label, osd, set_lyric_align};
+use super::{get_label, osd, set_lyric_align, zoom};
 
 pub fn register_switch_decoration(wind: &Window, trigger: &str) {
     let action = SimpleAction::new("switch-decoration", None);
@@ -121,8 +121,43 @@ pub fn register_reset_position(wind: &Window) {
                     wind.imp().osd_dock_margin.get(),
                 );
                 osd::place(&wind, x, y);
+                zoom::set_anchor(&wind, x, y, wind.width(), wind.height());
+                wind.imp().osd_pinned.set(false);
             }
             crate::config::save_lyric_offset(0, 0);
+        }
+    ));
+    wind.add_action(&action);
+}
+
+/// How many grey lines to show around the current one (-1 = as many as fit).
+pub fn register_set_context_lines(wind: &Window) {
+    let action = SimpleAction::new("set-context-lines", Some(VariantTy::INT32));
+    action.connect_activate(clone!(
+        #[weak]
+        wind,
+        move |_, count| {
+            let Some(count) = count.and_then(|c| c.get::<i32>()) else {
+                return;
+            };
+            let count = count.clamp(-1, 8);
+            wind.imp().context_lines.set(count);
+            crate::config::save_integers(&[("context-lines", count as i64)]);
+        }
+    ));
+    wind.add_action(&action);
+}
+
+/// Multiply the lyrics zoom by the given factor (the tray's zoom entries).
+pub fn register_zoom(wind: &Window) {
+    let action = SimpleAction::new("zoom", Some(VariantTy::DOUBLE));
+    action.connect_activate(clone!(
+        #[weak]
+        wind,
+        move |_, factor| {
+            if let Some(factor) = factor.and_then(|f| f.get::<f64>()) {
+                zoom::zoom_by(&wind, factor);
+            }
         }
     ));
     wind.add_action(&action);

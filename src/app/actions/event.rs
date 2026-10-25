@@ -25,6 +25,10 @@ pub enum UIAction {
     SetLyricAlign(String),
     /// put the lyrics back above the dock and forget the dragged position
     ResetPosition,
+    /// multiply the lyrics zoom by this factor
+    Zoom(f64),
+    /// grey lines around the current one, -1 = as many as fit
+    SetContextLines(i32),
     /// Quit Waylyrics
     Quit,
 }
@@ -73,6 +77,14 @@ fn register_ui_action(app: WeakRef<Application>, wind: WeakRef<Window>) -> Sende
                 ),
                 UIAction::ResetPosition => {
                     ActionGroupExt::activate_action(&wind, "reset-position", None)
+                }
+                UIAction::SetContextLines(count) => ActionGroupExt::activate_action(
+                    &wind,
+                    "set-context-lines",
+                    Some(&count.to_variant()),
+                ),
+                UIAction::Zoom(factor) => {
+                    ActionGroupExt::activate_action(&wind, "zoom", Some(&factor.to_variant()))
                 }
                 UIAction::Quit => {
                     wind.close();

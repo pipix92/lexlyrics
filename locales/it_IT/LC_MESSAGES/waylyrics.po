@@ -237,3 +237,27 @@ msgstr "HUD a schermo intero"
 #: ../src/tray_icon/unix/mod.rs
 msgid "Move Back Above the Dock"
 msgstr "Riporta sopra la dock"
+
+#: ../src/tray_icon/unix/mod.rs
+msgid "Bigger"
+msgstr "Più grande"
+
+#: ../src/tray_icon/unix/mod.rs
+msgid "Smaller"
+msgstr "Più piccolo"
+
+#: ../src/sync/interop/mpris/sync_task.rs
+msgid "No synced lyrics found for this song"
+msgstr "Nessun testo sincronizzato trovato per questo brano"
+
+#: ../src/sync/interop/mpris/sync_task.rs
+msgid "Searching lyrics…"
+msgstr "Cerco il testo…"
+
+#: ../src/tray_icon/unix/mod.rs
+msgid "Lines Before and After"
+msgstr "Righe prima e dopo"
+
+#: ../src/tray_icon/unix/mod.rs
+msgid "Auto (fit the window)"
+msgstr "Auto (quante ne stanno)"

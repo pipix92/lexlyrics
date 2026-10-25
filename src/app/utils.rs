@@ -52,6 +52,13 @@ pub(super) fn set_click_pass_through(window: &window::Window, enabled: bool) {
     use gtk::cairo::{RectangleInt, Region};
     use gtk::subclass::prelude::*;
 
+    // lets the theme fade the bar, so it is clear it cannot be grabbed
+    if enabled {
+        window.add_css_class("passthrough");
+    } else {
+        window.remove_css_class("passthrough");
+    }
+
     let obj = window;
     let Some(surface) = obj.surface() else {
         return;

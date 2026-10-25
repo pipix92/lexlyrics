@@ -18,8 +18,8 @@ use tracing_subscriber::{fmt, Registry};
 
 use waylyrics::app::actions::{
     register_reload_theme, register_reset_position, register_set_display_mode, register_set_label,
-    register_set_lyric_align, register_switch_decoration, register_switch_passthrough, UIAction,
-    UI_ACTION,
+    register_set_lyric_align, register_switch_decoration, register_switch_passthrough,
+    register_set_context_lines, register_zoom, UIAction, UI_ACTION,
 };
 use waylyrics::app::{self, build_main_window};
 
@@ -235,6 +235,8 @@ fn build_ui(app: &Application) -> Result<()> {
         lyric_offset_x,
         lyric_offset_y,
         passthrough_by_default,
+        zoom,
+        context_lines,
         translation,
     } = config;
 
@@ -295,6 +297,8 @@ fn build_ui(app: &Application) -> Result<()> {
         lyric_offset_x,
         lyric_offset_y,
         passthrough_by_default,
+        zoom,
+        context_lines,
     );
 
     register_sync_task(
@@ -355,6 +359,8 @@ fn register_actions(
     register_switch_passthrough(wind, &switch_passthrough);
     register_set_label(wind);
     register_reset_position(wind);
+    register_set_context_lines(wind);
+    register_zoom(wind);
     register_reload_theme(app, wind, &reload_theme);
     register_search_lyric(app, wind, &search_lyric);
     register_remove_lyric(app, wind);

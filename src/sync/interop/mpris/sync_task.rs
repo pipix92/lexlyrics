@@ -108,9 +108,16 @@ pub fn try_sync_track(window: &crate::app::Window) -> Result<(), PlayerStatus> {
             let Some(window) = window.upgrade() else {
                 return;
             };
-            reset_lyric_labels(&window, None);
+            reset_lyric_labels(&window, Some(&crate::utils::gettext("Searching lyrics…")));
             if let Err(e) = update_lyric(&meta, &window, false).await {
-                error!("{e} occurs fetching lyric")
+                error!("{e} occurs fetching lyric");
+                // say so, instead of leaving the idle text up as if still loading
+                if crate::sync::interop::common::is_current_track(&meta) {
+                    reset_lyric_labels(
+                        &window,
+                        Some(&crate::utils::gettext("No synced lyrics found for this song")),
+                    );
+                }
             }
         });
     }

@@ -80,6 +80,8 @@ WINDOW_DEFAULTS = {
     "passthrough-by-default": False,
     "lyric-offset-x": 0,
     "lyric-offset-y": 0,
+    "zoom": 1.0,
+    "context-lines": -1,
 }
 
 
@@ -185,7 +187,7 @@ def read_config() -> dict:
 def toml_literal(value) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
-    if isinstance(value, int):
+    if isinstance(value, (int, float)):
         return str(value)
     return json.dumps(str(value), ensure_ascii=False)  # stringa TOML base, escape compatibili
 
@@ -243,14 +245,21 @@ def obj_path(name: str) -> str:
     return "/" + name.replace(".", "/").replace("-", "_")
 
 
-def activate(name: str, path: str, action: str, arg: str | None = None) -> bool:
-    gv = f"[<'{arg}'>]" if arg is not None else "[]"
+def activate(name: str, path: str, action: str, arg=None) -> bool:
+    if isinstance(arg, bool) or arg is None:
+        gv, bus_arg = "[]", None
+    elif isinstance(arg, int):
+        gv, bus_arg = f"[<int32 {arg}>]", ["1", "i", str(arg), "0"]
+    elif isinstance(arg, float):
+        gv, bus_arg = f"[<double {arg}>]", ["1", "d", str(arg), "0"]
+    else:
+        gv, bus_arg = f"[<'{arg}'>]", ["1", "s", arg, "0"]
     r = run(["gdbus", "call", "--session", "--dest", name, "--object-path", path,
              "--method", "org.gtk.Actions.Activate", action, gv, "{}"])
     if r and r.returncode == 0:
         return True
     cmd = ["busctl", "--user", "call", name, path, "org.gtk.Actions", "Activate", "sava{sv}", action]
-    cmd += ["1", "s", arg, "0"] if arg is not None else ["0", "0"]
+    cmd += bus_arg if bus_arg is not None else ["0", "0"]
     r = run(cmd)
     return bool(r and r.returncode == 0)
 
@@ -263,7 +272,7 @@ def reload_theme() -> str:
     return f"Tema ricaricato a caldo ({ok}/{len(names)} istanze)." if ok else "Reload D-Bus fallito (serve gdbus o busctl)."
 
 
-def window_action(action: str, arg: str | None = None) -> int:
+def window_action(action: str, arg=None) -> int:
     return sum(activate(n, obj_path(n) + "/window/1", action, arg) for n in bus_names())
 
 
@@ -347,6 +356,9 @@ class TUI:
             ("Distanza dalla dock (px)", str(self.win("osd-dock-margin")), lambda: self.pick_window_int("osd-dock-margin", "Distanza dal bordo inferiore", 0, 1000)),
             ("Click-through all'avvio", "sì" if self.win("passthrough-by-default") else "no  (Alt+P lo attiva al volo)", self.toggle_passthrough),
             ("Posizione", pos, self.do_reset_position),
+            ("Zoom", f"{float(self.win('zoom')):.2f}×  (anche Alt + rotellina)", self.pick_zoom),
+            ("Righe prima/dopo", "auto (quante ne stanno)" if int(self.win("context-lines")) < 0
+             else str(self.win("context-lines")), self.pick_context_lines),
             ("⇄ Traduzione", "", HEADER),
             ("Backend", f"{backend} — {BACKEND_LABELS.get(backend, '?')}", self.pick_backend),
             ("", "", HEADER),
@@ -507,6 +519,34 @@ class TUI:
     def toggle_passthrough(self):
         set_config("passthrough-by-default", not self.win("passthrough-by-default"))
         self.changed_window("Click-through")
+
+    def pick_zoom(self):
+        current = float(self.win("zoom"))
+        s = self.prompt("Zoom (0.5-3.0)", f"{current:.2f}")
+        try:
+            v = round(float(s.replace(",", ".")), 2)
+            assert 0.5 <= v <= 3.0
+        except (ValueError, AssertionError):
+            self.msg = "Valore non valido."
+            return
+        if bus_names() and window_action("zoom", v / current):
+            self.msg = f"Zoom {v:.2f}× applicato."  # LexLyrics lo salva da solo
+        else:
+            set_config("zoom", v)
+            self.msg = f"Zoom {v:.2f}× salvato: applicato al prossimo avvio."
+
+    def pick_context_lines(self):
+        opts = ["auto (quante ne stanno)"] + [str(n) for n in range(0, 9)]
+        cur = int(self.win("context-lines"))
+        r = self.menu("Righe grigie prima e dopo quella corrente", opts, opts[0] if cur < 0 else str(cur))
+        if r is None:
+            return
+        n = -1 if r.startswith("auto") else int(r)
+        if bus_names() and window_action("set-context-lines", n):
+            self.msg = "Righe prima/dopo applicate."
+        else:
+            set_config("context-lines", n)
+            self.msg = "Righe prima/dopo salvate: applicate al prossimo avvio."
 
     def do_reset_position(self):
         self.msg = reset_position()

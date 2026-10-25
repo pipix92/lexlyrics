@@ -93,7 +93,7 @@ pub async fn fetch_lyric_cached(
                             .to_variant()])),
                     );
                     LYRIC.set(LyricState {
-                        origin,
+                        origin: crate::translation::blank_credit_lines(origin),
                         translation,
                     });
                     window.imp().lyric_offset_ms.set(offset);

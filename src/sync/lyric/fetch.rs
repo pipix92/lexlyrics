@@ -164,7 +164,7 @@ fn set_lyric(origin: LyricOwned, translation: LyricOwned, title: &str, artists: 
     };
 
     LYRIC.set(LyricState {
-        origin,
+        origin: crate::translation::blank_credit_lines(origin),
         translation,
     });
 }

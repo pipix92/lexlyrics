@@ -64,6 +64,11 @@ pub fn save_bool(key: &str, new: bool) {
     save(vec![(key, value(new))]);
 }
 
+pub fn save_float(key: &str, new: f64) {
+    // two decimals are plenty for a zoom factor and keep the file readable
+    save(vec![(key, value((new * 100.0).round() / 100.0))]);
+}
+
 /// Remember where the user dragged the lyrics to.
 pub fn save_lyric_offset(x: i32, y: i32) {
     save_integers(&[("lyric-offset-x", x as i64), ("lyric-offset-y", y as i64)]);

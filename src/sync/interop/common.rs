@@ -24,9 +24,14 @@ pub async fn update_lyric(
     ignore_cache: bool,
 ) -> Result<(), Error> {
     static UPDATE_LYRIC_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
-    let Ok(_gaurd) = UPDATE_LYRIC_LOCK.try_lock() else {
-        return Err(anyhow::anyhow!("update_lyric already in queue"));
-    };
+    // wait for the previous track's fetch instead of dropping this one: when
+    // skipping quickly, the track that ends up playing would otherwise never
+    // get its lyric
+    let _gaurd = UPDATE_LYRIC_LOCK.lock().await;
+    if !is_current_track(track_meta) {
+        debug!("track changed while waiting for the previous fetch, skipping");
+        return Ok(());
+    }
 
     crate::sync::utils::clean_lyric(window);
 
@@ -82,6 +87,22 @@ pub fn register_sync_task(wind: WeakRef<Window>, interval: Duration, auto_connec
 
         glib::ControlFlow::Continue
     });
+}
+
+/// Whether `track_meta` is still the track playing (length is not compared,
+/// see `need_fetch_lyric`).
+pub fn is_current_track(track_meta: &TrackMeta) -> bool {
+    TRACK_PLAYING_STATE.with_borrow(|TrackState { metainfo, .. }| {
+        metainfo.as_ref().is_some_and(|playing| {
+            TrackMeta {
+                length: None,
+                ..playing.clone()
+            } == TrackMeta {
+                length: None,
+                ..track_meta.clone()
+            }
+        })
+    })
 }
 
 pub fn need_fetch_lyric(track_meta: &TrackMeta) -> bool {

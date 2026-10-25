@@ -66,14 +66,7 @@ pub async fn translate_missing(cache: bool) {
         let texts: Vec<String> = chunk.iter().map(|text| text.to_string()).collect();
         let config = config.clone();
         let result = crate::tokio_spawn!(async move {
-            crate::translation::translate_batch(
-                &texts,
-                &config.backend,
-                &config.nllb_url,
-                &config.target_lang,
-                config.timeout_ms,
-            )
-            .await
+            crate::translation::translate_batch(&texts, &config).await
         })
         .await;
 

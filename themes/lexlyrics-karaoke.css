@@ -26,6 +26,13 @@ window.osd-mode #lyrics-box {
   box-shadow: 0 6px 22px rgba(0, 0, 0, 0.45);
 }
 
+/* Click-through on (Alt+P / tray): the bar fades, it cannot be grabbed now */
+window.osd-mode.passthrough #lyrics-box {
+  background-color: rgba(10, 14, 28, 0.18);
+  border-color: transparent;
+  box-shadow: none;
+}
+
 /* Fullscreen HUD: nothing but the lyrics floating over the desktop */
 window.hud-mode #lyrics-box {
   background-color: transparent;

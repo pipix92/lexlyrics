@@ -199,6 +199,17 @@ pub struct Config {
     /// Whether mouse click-through is enabled by default at startup
     pub passthrough_by_default: bool,
 
+    /// Size of the lyrics (and of the OSD bar), changed with `Alt` + mouse wheel
+    ///
+    /// 1.0 is the size set by the theme; allowed range is 0.5 to 3.0.
+    pub zoom: f64,
+
+    /// Grey lines shown before and after the current one
+    ///
+    /// -1 (default) fits as many as the window height allows, so a taller
+    /// bar shows more of the song; 0 to 8 shows exactly that many.
+    pub context_lines: i32,
+
     /// Neural translation backend settings
     pub translation: TranslationConfig,
 }
@@ -206,14 +217,23 @@ pub struct Config {
 #[derive(Clone, Deserialize, Serialize, Debug, DocumentedFields)]
 #[serde(default)]
 pub struct TranslationConfig {
-    /// Preferred translation backend: "nllb", "marian", "agy", "claude", "hermes"
+    /// Preferred translation backend: "nllb", "marian", "agy", "claude", "hermes", "api"
     pub backend: String,
     /// Local neural NLLB-200 HTTP server endpoint
     pub nllb_url: String,
-    /// Target language code
+    /// Target language: NLLB code (`ita_Latn`) or ISO 639-1 (`de`)
+    ///
+    /// Italian is translated locally by the configured backend; other
+    /// languages are a work in progress and go through the external API
+    /// below for now.
     pub target_lang: String,
     /// Timeout in milliseconds before fallback
     pub timeout_ms: u64,
+    /// External translation API used for non-Italian targets (MyMemory)
+    pub api_url: String,
+    /// Optional e-mail for the external API: raises MyMemory's free quota
+    /// from 5000 to 50000 characters a day
+    pub api_email: String,
 }
 
 impl Default for TranslationConfig {
@@ -223,6 +243,8 @@ impl Default for TranslationConfig {
             nllb_url: "http://127.0.0.1:18436/translate".into(),
             target_lang: "ita_Latn".into(),
             timeout_ms: 2500,
+            api_url: "https://api.mymemory.translated.net/get".into(),
+            api_email: String::new(),
         }
     }
 }
@@ -296,6 +318,8 @@ impl Default for Config {
             // the OSD bar has to be grabbable to be dragged around;
             // `Alt`+`p` turns click-through on once it sits where it should
             passthrough_by_default: false,
+            zoom: 1.0,
+            context_lines: -1,
             translation: TranslationConfig::default(),
         }
     }
@@ -338,7 +362,7 @@ mod merge;
 pub use merge::append_comments;
 
 mod persist;
-pub use persist::{save_bool, save_integers, save_lyric_offset};
+pub use persist::{save_bool, save_float, save_integers, save_lyric_offset};
 
 #[cfg(feature = "layer-shell")]
 mod layer_shell;

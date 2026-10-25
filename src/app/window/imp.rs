@@ -31,6 +31,22 @@ pub struct Window {
 
     /// clearance kept above the dock when the OSD bar is placed automatically
     pub osd_dock_margin: Cell<i32>,
+    /// OSD bar size at zoom 1.0, from `window-width` / `window-height`
+    pub osd_base_size: Cell<(i32, i32)>,
+    /// bottom-center point the OSD bar stays anchored to while it is zoomed
+    pub osd_anchor: Cell<Option<(i32, i32)>>,
+    /// whether the user put the bar somewhere (vs automatic placement)
+    pub osd_pinned: Cell<bool>,
+    /// size the OSD bar was last anchored with
+    pub osd_last_size: Cell<(i32, i32)>,
+    /// the user is dragging the bar right now
+    pub osd_dragging: Cell<bool>,
+    /// current zoom factor of the lyrics, see `zoom` in the config
+    pub zoom: Cell<f64>,
+    /// grey lines around the current one, -1 = as many as fit
+    pub context_lines: Cell<i32>,
+    /// bumped on every zoom change, so only the last one gets saved
+    pub zoom_generation: Cell<u32>,
 
     pub lyric_start: Cell<Option<SystemTime>>,
     pub lyric_offset_ms: Cell<i64>,
@@ -207,6 +223,7 @@ impl WidgetImpl for Window {
         self.parent_size_allocate(width, height, baseline);
         let clickthrough = self.clickthrough.get();
         set_click_pass_through(&self.obj(), clickthrough);
+        crate::app::zoom::keep_anchored(&self.obj(), width, height);
     }
 }
 impl WindowImpl for Window {

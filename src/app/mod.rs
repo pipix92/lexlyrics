@@ -22,6 +22,7 @@ pub mod actions;
 pub mod dialog;
 pub mod osd;
 pub mod utils;
+pub mod zoom;
 
 pub fn build_main_window(
     app: &Application,
@@ -42,6 +43,8 @@ pub fn build_main_window(
     lyric_offset_x: i32,
     lyric_offset_y: i32,
     passthrough_by_default: bool,
+    zoom: f64,
+    context_lines: i32,
 ) -> Window {
     let window = Window::new(
         app,
@@ -71,9 +74,15 @@ pub fn build_main_window(
     // Two window modes: the compact OSD bar (default) is a small borderless
     // strip living above the dock, the fullscreen HUD covers the whole screen
     // and places the lyrics inside it.
-    let (osd_width, osd_height) = (
+    let zoom = zoom.clamp(zoom::MIN_ZOOM, zoom::MAX_ZOOM);
+    let osd_base_size = (
         window_width.unwrap_or(OSD_DEFAULT_SIZE.0),
-        window_height.unwrap_or(OSD_DEFAULT_SIZE.1).max(WINDOW_MIN_HEIGHT),
+        window_height.unwrap_or(OSD_DEFAULT_SIZE.1),
+    );
+    window.imp().osd_base_size.set(osd_base_size);
+    let (osd_width, osd_height) = (
+        zoom::scaled(osd_base_size.0, zoom),
+        zoom::scaled(osd_base_size.1, zoom).max(WINDOW_MIN_HEIGHT),
     );
 
     if start_fullscreen {
@@ -132,21 +141,37 @@ pub fn build_main_window(
         utils::setup_label(label, enable_filter_regex);
     }
 
+    if !start_fullscreen {
+        // the glass fills the whole bar: let the spare height go to the outer
+        // rows, so the four lines stay grouped in the middle of it
+        prev_label.set_vexpand(true);
+        prev_label.set_valign(gtk::Align::End);
+        next_label.set_vexpand(true);
+        next_label.set_valign(gtk::Align::Start);
+        above_label.set_vexpand(false);
+        below_label.set_vexpand(false);
+    }
+
     let verical_box = gtk::Box::builder()
         .name("lyrics-box")
         .baseline_position(gtk::BaselinePosition::Center)
         .orientation(gtk::Orientation::Vertical)
-        // the HUD keeps the lyrics clear of the dock on its own, the OSD bar
-        // is already sitting exactly where it should
+        // the HUD floats the lyrics clear of the dock; in OSD mode the box is
+        // the bar itself and fills the window, so there is always something
+        // visible to grab
         .valign(if start_fullscreen {
             gtk::Align::End
         } else {
-            gtk::Align::Center
+            gtk::Align::Fill
         })
-        .margin_bottom(if start_fullscreen { 52 } else { 4 })
-        .halign(gtk::Align::Center)
+        .halign(if start_fullscreen {
+            gtk::Align::Center
+        } else {
+            gtk::Align::Fill
+        })
+        .margin_bottom(if start_fullscreen { 52 } else { 0 })
         .vexpand(true)
-        .hexpand(false)
+        .hexpand(!start_fullscreen)
         .build();
 
     verical_box.insert_child_after(&prev_label, gtk::Box::NONE);
@@ -176,6 +201,9 @@ pub fn build_main_window(
         setup_osd_drag(&window);
     }
 
+    zoom::apply(&window, zoom);
+    zoom::setup_scroll_zoom(&window);
+
     let align = window.imp().lyric_align.get();
     set_lyric_align(&window, align);
 
@@ -191,6 +219,7 @@ pub fn build_main_window(
     window.imp().clickthrough.set(passthrough_by_default);
     set_click_pass_through(&window, passthrough_by_default);
     window.imp().osd_dock_margin.set(osd_dock_margin);
+    window.imp().context_lines.set(context_lines.clamp(-1, 8));
 
     window.set_icon_name(Some(crate::APP_ID_FIXED));
 
@@ -207,43 +236,149 @@ fn place_osd_window(
     saved_x: i32,
     saved_y: i32,
 ) {
-    let target = if saved_x > 0 || saved_y > 0 {
+    let pinned = saved_x > 0 || saved_y > 0;
+    let target = if pinned {
         (saved_x, saved_y)
     } else {
         osd::bottom_center(window, width, height, dock_margin)
     };
 
     osd::place(window, target.0, target.1);
+    window.imp().osd_pinned.set(pinned);
+    zoom::set_anchor(window, target.0, target.1, width, height);
+}
+
+/// `Alt`, or `Super` when the compositor lets it through
+fn move_modifier_held(state: gtk::gdk::ModifierType) -> bool {
+    use gtk::gdk::ModifierType;
+    state.intersects(ModifierType::ALT_MASK | ModifierType::SUPER_MASK | ModifierType::META_MASK)
 }
 
 fn alt_held(gesture: &gtk::GestureDrag) -> bool {
-    gesture.current_event().is_some_and(|event| {
-        event
-            .modifier_state()
-            .contains(gtk::gdk::ModifierType::ALT_MASK)
-    })
+    move_modifier_held(gesture.current_event_state())
 }
 
-/// `Alt` + mouse drag moves the whole OSD bar around; where it lands is
+/// how close to the border, in pixels, a press resizes the OSD bar instead of
+/// moving it
+const RESIZE_BORDER: f64 = 10.0;
+/// the OSD bar never gets narrower than this
+const OSD_MIN_WIDTH: i32 = 320;
+
+/// Borders of the OSD bar under the pointer, like a window manager's frame.
+#[derive(Clone, Copy, Default, PartialEq)]
+struct Edges {
+    left: bool,
+    right: bool,
+    top: bool,
+    bottom: bool,
+}
+
+impl Edges {
+    fn at(window: &Window, x: f64, y: f64) -> Self {
+        let (width, height) = (window.width() as f64, window.height() as f64);
+        Self {
+            left: x < RESIZE_BORDER,
+            right: x > width - RESIZE_BORDER,
+            top: y < RESIZE_BORDER,
+            bottom: y > height - RESIZE_BORDER,
+        }
+    }
+
+    fn any(self) -> bool {
+        self.left || self.right || self.top || self.bottom
+    }
+
+    fn cursor(self) -> &'static str {
+        match (self.left, self.right, self.top, self.bottom) {
+            (true, _, true, _) => "nw-resize",
+            (_, true, true, _) => "ne-resize",
+            (true, _, _, true) => "sw-resize",
+            (_, true, _, true) => "se-resize",
+            (true, ..) => "w-resize",
+            (_, true, ..) => "e-resize",
+            (_, _, true, _) => "n-resize",
+            (_, _, _, true) => "s-resize",
+            _ => "grab",
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum OsdDrag {
+    /// pointer offset inside the window when the drag started
+    Move { grab_x: i32, grab_y: i32 },
+    Resize {
+        edges: Edges,
+        pointer: (i32, i32),
+        /// x, y, width, height when the drag started
+        geometry: (i32, i32, i32, i32),
+    },
+}
+
+impl OsdDrag {
+    /// where the window goes for the pointer at `(pointer_x, pointer_y)`
+    fn geometry_for(self, pointer_x: i32, pointer_y: i32) -> (i32, i32, i32, i32) {
+        match self {
+            Self::Move { grab_x, grab_y } => (pointer_x - grab_x, pointer_y - grab_y, 0, 0),
+            Self::Resize {
+                edges,
+                pointer: (start_x, start_y),
+                geometry: (x, y, width, height),
+            } => {
+                let (dx, dy) = (pointer_x - start_x, pointer_y - start_y);
+                let mut new = (x, y, width, height);
+                if edges.right {
+                    new.2 = (width + dx).max(OSD_MIN_WIDTH);
+                }
+                if edges.left {
+                    new.2 = (width - dx).max(OSD_MIN_WIDTH);
+                    new.0 = x + width - new.2;
+                }
+                if edges.bottom {
+                    new.3 = (height + dy).max(WINDOW_MIN_HEIGHT);
+                }
+                if edges.top {
+                    new.3 = (height - dy).max(WINDOW_MIN_HEIGHT);
+                    new.1 = y + height - new.3;
+                }
+                new
+            }
+        }
+    }
+}
+
+/// The OSD bar behaves like a borderless window: drag it from anywhere to
+/// move it, drag its borders or corners to resize it. Position and size are
 /// written back to `config.toml`.
 ///
-/// The position is recomputed from the pointer on every update instead of
+/// Positions are recomputed from the pointer on every update instead of
 /// accumulating the gesture's offsets, because the window moves out from under
 /// the pointer as we go.
 fn setup_osd_drag(window: &Window) {
+    // cursor feedback: resize arrows on the borders, a hand everywhere else
+    let motion = gtk::EventControllerMotion::new();
+    motion.connect_motion({
+        let window = window.downgrade();
+        move |_, x, y| {
+            let Some(window) = window.upgrade() else {
+                return;
+            };
+            if !window.imp().osd_dragging.get() {
+                window.set_cursor_from_name(Some(Edges::at(&window, x, y).cursor()));
+            }
+        }
+    });
+    window.add_controller(motion);
+
     let drag = gtk::GestureDrag::new();
-    // pointer offset inside the window when the drag started
-    let grab = Rc::new(Cell::new(None::<(i32, i32)>));
+    let state = Rc::new(Cell::new(None::<OsdDrag>));
 
     drag.connect_drag_begin({
-        let grab = grab.clone();
+        let state = state.clone();
         let window = window.downgrade();
-        move |gesture, _, _| {
-            grab.set(None);
+        move |_, start_x, start_y| {
+            state.set(None);
 
-            if !alt_held(gesture) {
-                return;
-            }
             let Some(window) = window.upgrade() else {
                 return;
             };
@@ -253,35 +388,77 @@ fn setup_osd_drag(window: &Window) {
                 return;
             };
 
-            grab.set(Some((pointer_x - window_x, pointer_y - window_y)));
+            let edges = Edges::at(&window, start_x, start_y);
+            state.set(Some(if edges.any() {
+                OsdDrag::Resize {
+                    edges,
+                    pointer: (pointer_x, pointer_y),
+                    geometry: (window_x, window_y, window.width(), window.height()),
+                }
+            } else {
+                window.set_cursor_from_name(Some("grabbing"));
+                OsdDrag::Move {
+                    grab_x: pointer_x - window_x,
+                    grab_y: pointer_y - window_y,
+                }
+            }));
+            window.imp().osd_dragging.set(true);
         }
     });
 
     drag.connect_drag_update({
-        let grab = grab.clone();
+        let state = state.clone();
         let window = window.downgrade();
         move |_, _, _| {
-            let (Some((grab_x, grab_y)), Some(window)) = (grab.get(), window.upgrade()) else {
+            let (Some(drag), Some(window)) = (state.get(), window.upgrade()) else {
                 return;
             };
             let Some((pointer_x, pointer_y, _)) = osd::pointer() else {
                 return;
             };
 
-            osd::place(&window, pointer_x - grab_x, pointer_y - grab_y);
+            let (x, y, width, height) = drag.geometry_for(pointer_x, pointer_y);
+            if let OsdDrag::Resize { .. } = drag {
+                window.set_default_size(width, height);
+            }
+            osd::place(&window, x, y);
         }
     });
 
     drag.connect_drag_end({
         let window = window.downgrade();
         move |_, _, _| {
-            let (Some(_), Some(window)) = (grab.take(), window.upgrade()) else {
+            let (Some(drag), Some(window)) = (state.take(), window.upgrade()) else {
                 return;
             };
+            window.imp().osd_dragging.set(false);
+            window.set_cursor_from_name(Some("grab"));
 
-            if let Some((x, y)) = osd::position(&window) {
-                config::save_lyric_offset(x, y);
-            }
+            let Some((x, y)) = osd::position(&window) else {
+                return;
+            };
+            let (width, height) = match drag {
+                OsdDrag::Move { .. } => (window.width(), window.height()),
+                OsdDrag::Resize { .. } => {
+                    let (width, height) = window.default_size();
+                    // the config keeps the size at zoom 1.0
+                    let zoom = window.imp().zoom.get();
+                    let base = (
+                        (width as f64 / zoom).round() as i32,
+                        (height as f64 / zoom).round() as i32,
+                    );
+                    window.imp().osd_base_size.set(base);
+                    config::save_integers(&[
+                        ("window-width", base.0 as i64),
+                        ("window-height", base.1 as i64),
+                    ]);
+                    (width, height)
+                }
+            };
+
+            config::save_lyric_offset(x, y);
+            window.imp().osd_pinned.set(true);
+            zoom::set_anchor(&window, x, y, width, height);
         }
     });
 
@@ -343,7 +520,9 @@ fn setup_hud_drag(lyrics_box: &gtk::Box) {
 
 pub fn set_lyric_align(window: &Window, align: config::Align) -> Option<()> {
     let vbox: gtk::Box = window.child()?.downcast().ok()?;
-    vbox.set_halign(align.into());
+    if !window.has_css_class("osd-mode") {
+        vbox.set_halign(align.into());
+    }
 
     let labels = get_labels(&vbox)?;
     for label in labels {
