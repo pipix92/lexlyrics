@@ -61,13 +61,11 @@ pub async fn fetch_lyric_cached(
         if let Ok(lyric) = std::fs::read_to_string(&cache_path) {
             let cached_lyric: Result<LyricCache, _> = serde_json::from_str(&lyric);
             match cached_lyric {
-                Ok(LyricCache { olyric: origin, .. }) if !origin.has_lines() => {
-                    info!("cached lyric for {cache_path:?} has no lines, searching again");
-                }
                 Ok(LyricCache {
                     olyric: origin,
                     tlyric: translation,
                     offset,
+                    refined,
                 }) => {
                     let translation = if match &translation {
                         LyricOwned::LineTimestamp(lines) => lines.iter().any(|l| crate::translation::contains_chinese(&l.text)),
@@ -92,10 +90,13 @@ pub async fn fetch_lyric_cached(
                             .to_string_lossy()
                             .to_variant()])),
                     );
+                    // a discarded Chinese translation was never refined
+                    let refined = refined && translation.has_lines();
                     LYRIC.set(LyricState {
                         origin: crate::translation::blank_credit_lines(origin),
                         translation,
                     });
+                    crate::sync::lyric::translate::set_refined(refined);
                     window.imp().lyric_offset_ms.set(offset);
                     info!("set offset: {offset}ms");
                     return Ok(());
@@ -154,7 +155,7 @@ fn write_lyric_cache(cache_path: &Path, offset: i64) -> bool {
              translation,
          }| {
             // do not cache empty lyric
-            if !origin.has_lines() && !translation.has_lines() {
+            if origin.is_none() && translation.is_none() {
                 return false;
             }
 
@@ -164,6 +165,7 @@ fn write_lyric_cache(cache_path: &Path, offset: i64) -> bool {
                     olyric: origin.clone(),
                     tlyric: translation.clone(),
                     offset,
+                    refined: crate::sync::lyric::translate::is_refined(),
                 })
                 .expect("cannot serialize lyrics!"),
             ) else {
@@ -182,6 +184,9 @@ struct LyricCache {
     olyric: LyricOwned,
     tlyric: LyricOwned,
     offset: i64,
+    /// the translation already went through the LLM refinement pass
+    #[serde(default)]
+    refined: bool,
 }
 
 fn md5_cache_dir(digest: md5::Digest) -> PathBuf {

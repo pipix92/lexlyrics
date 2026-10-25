@@ -95,12 +95,14 @@ impl super::LyricProvider for QQMusic {
                 return Ok(LyricStore {
                     lyric: None,
                     tlyric: None,
+                    estimated: false,
                 });
             }
 
             Ok(LyricStore {
                 lyric: Some(resp.data.lyric),
                 tlyric: Some(resp.data.trans),
+                estimated: false,
             })
         })
         .await?

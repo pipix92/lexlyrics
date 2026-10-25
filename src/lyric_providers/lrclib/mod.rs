@@ -36,10 +36,27 @@ impl super::LyricProvider for LRCLib {
             let resp = REQWEST_CLIENT.get(req.uri().to_string()).send().await?;
             let result: GetLyricsResponse = resp.json().await?;
             match result {
-                GetLyricsResponse::Success(LyricsData { synced_lyrics, .. }) => Ok(LyricStore {
-                    lyric: synced_lyrics,
-                    tlyric: None,
-                }),
+                GetLyricsResponse::Success(LyricsData {
+                    synced_lyrics,
+                    plain_lyrics,
+                    duration,
+                    ..
+                }) => {
+                    let synced = synced_lyrics.filter(|lyric| !lyric.trim().is_empty());
+                    // plenty of songs only have plain lyrics on LRCLib: time
+                    // them roughly rather than show nothing
+                    let estimated = match (&synced, plain_lyrics, duration) {
+                        (None, Some(plain), Some(duration)) if !plain.trim().is_empty() => {
+                            Some(super::estimate_timing(&plain, duration))
+                        }
+                        _ => None,
+                    };
+                    Ok(LyricStore {
+                        estimated: estimated.is_some(),
+                        lyric: synced.or(estimated),
+                        tlyric: None,
+                    })
+                }
                 GetLyricsResponse::Error(ErrorResponse { message, .. }) => {
                     crate::log::debug!("query failed: {message}");
                     Err(super::Error::NoResult)?

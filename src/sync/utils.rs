@@ -86,6 +86,7 @@ pub fn match_likely_lyric<'a>(
 
 pub fn set_current_lyric(lyric: LyricState) {
     LYRIC.set(lyric);
+    crate::sync::lyric::translate::set_refined(false);
 }
 
 pub fn get_lyric_cache_path() -> Option<PathBuf> {

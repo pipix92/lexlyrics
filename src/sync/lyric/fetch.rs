@@ -108,12 +108,22 @@ pub async fn fetch_lyric(track_meta: &TrackMeta, window: &app::Window) -> Result
 
     results.sort_by_key(|(_, _, weight)| *weight);
 
+    // estimated timing is only a last resort: keep looking for a synced match
+    let mut estimated = None;
+
     for (song_id, weight, platform_idx) in results {
         let provider = &providers[platform_idx];
         match provider.query_lyric(&song_id).await {
             Ok(lyric) => {
                 let olyric = provider.parse_lyric(&lyric);
                 let tlyric = provider.parse_translated_lyric(&lyric);
+
+                if lyric.estimated {
+                    if estimated.is_none() && olyric.has_lines() {
+                        estimated = Some((olyric, tlyric, song_id, provider.unique_name()));
+                    }
+                    continue;
+                }
 
                 if !olyric.has_lines() {
                     info!(
@@ -138,6 +148,13 @@ pub async fn fetch_lyric(track_meta: &TrackMeta, window: &app::Window) -> Result
             }
         };
     }
+
+    if let Some((olyric, tlyric, song_id, provider)) = estimated {
+        info!("no synced lyric, using {song_id} from {provider} with estimated timing");
+        set_lyric(olyric, tlyric, &title, &artists_str);
+        return Ok(());
+    }
+
     Err(crate::lyric_providers::Error::NoResult)?
 }
 
@@ -167,4 +184,5 @@ fn set_lyric(origin: LyricOwned, translation: LyricOwned, title: &str, artists: 
         origin: crate::translation::blank_credit_lines(origin),
         translation,
     });
+    crate::sync::lyric::translate::set_refined(false);
 }

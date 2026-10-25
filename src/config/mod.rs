@@ -234,6 +234,15 @@ pub struct TranslationConfig {
     /// Optional e-mail for the external API: raises MyMemory's free quota
     /// from 5000 to 50000 characters a day
     pub api_email: String,
+    /// Second pass that rewrites the whole song with an LLM CLI, for slang,
+    /// swearing and idioms NLLB-200 translates literally: "agy", "hermes",
+    /// "claude" or "none"
+    ///
+    /// The quick translation shows up first; the refined one replaces it a
+    /// few tens of seconds later and is cached, so each song is refined once.
+    pub refine_backend: String,
+    /// Give up on the refinement pass after this many seconds
+    pub refine_timeout_s: u64,
 }
 
 impl Default for TranslationConfig {
@@ -245,6 +254,8 @@ impl Default for TranslationConfig {
             timeout_ms: 2500,
             api_url: "https://api.mymemory.translated.net/get".into(),
             api_email: String::new(),
+            refine_backend: "agy".into(),
+            refine_timeout_s: 180,
         }
     }
 }

@@ -115,6 +115,31 @@ impl LyricLine<'_> {
 pub struct LyricStore {
     lyric: Option<String>,
     tlyric: Option<String>,
+    /// the timestamps were estimated from plain lyrics, nobody synced them:
+    /// only used when no provider has a synced version
+    pub estimated: bool,
+}
+
+/// Turn plain lyrics into LRC by spreading the lines over the song, each one
+/// getting time in proportion to its length, between a guessed intro and
+/// outro. Blank lines (stanza breaks) become short pauses.
+pub fn estimate_timing(plain: &str, duration_s: f64) -> String {
+    let lines: Vec<&str> = plain.lines().map(str::trim).collect();
+    let weight = |line: &str| line.chars().count() as f64 + 12.0;
+    let total: f64 = lines.iter().map(|line| weight(line)).sum();
+    if lines.iter().all(|line| line.is_empty()) || duration_s <= 0.0 {
+        return String::new();
+    }
+
+    let (start, end) = (duration_s * 0.07, duration_s * 0.93);
+    let mut time = start;
+    let mut lrc = String::new();
+    for line in lines {
+        let minutes = (time / 60.0).floor();
+        lrc += &format!("[{:02}:{:05.2}]{line}\n", minutes as u64, time - minutes * 60.0);
+        time += (end - start) * weight(line) / total;
+    }
+    lrc
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -125,4 +150,28 @@ pub enum Error {
 
 pub fn default_search_query(album: &str, artists: &[&str], title: &str) -> String {
     format!("{title} {album} {}", artists.join("/"))
+}
+
+#[cfg(test)]
+mod estimate_tests {
+    use super::{estimate_timing, utils::lrc_iter};
+
+    #[test]
+    fn estimated_lrc_parses_in_order() {
+        let plain = "First line of the song\nSecond one\n\nAfter a stanza break\nLast line";
+        let lrc = estimate_timing(plain, 200.0);
+        let lines = lrc_iter(lrc.lines()).expect("estimated lyric must be valid LRC");
+
+        let texts: Vec<_> = lines.iter().map(|l| l.text.trim()).collect();
+        assert_eq!(texts.iter().filter(|t| !t.is_empty()).count(), 4);
+        assert!(lines.windows(2).all(|w| w[0].start_time < w[1].start_time));
+        assert!(lines[0].start_time.as_secs_f64() >= 13.0);
+        assert!(lines.last().unwrap().start_time.as_secs_f64() < 186.0);
+    }
+
+    #[test]
+    fn nothing_to_estimate() {
+        assert!(estimate_timing("\n\n", 200.0).is_empty());
+        assert!(estimate_timing("a line", 0.0).is_empty());
+    }
 }

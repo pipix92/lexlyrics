@@ -260,6 +260,95 @@ async fn translate_nllb(
     }
 }
 
+const REFINE_PROMPT: &str = "Sei un traduttore di testi musicali. Traduci in italiano il testo \
+della canzone \"{title}\" di {artist}.
+Regole:
+- italiano naturale e scorrevole, come lo direbbe un madrelingua, non parola per parola;
+- modi di dire, metafore e giochi di parole: rendi il significato con un'espressione italiana equivalente;
+- parolacce, slang e volgarità: mantienile con un equivalente italiano di pari forza, senza censurare né attenuare;
+- nomi propri, marchi e parti già in italiano restano invariati;
+- tieni conto del contesto di tutta la canzone.
+Rispondi SOLO con le righe tradotte nel formato NUMERO: TESTO, una per riga, \
+con gli stessi numeri, senza commenti.
+
+{lines}";
+
+/// Second pass: an LLM CLI rewrites the whole song in natural Italian, fixing
+/// what NLLB-200 renders literally (slang, swearing, idioms).
+///
+/// Returns one entry per input line; `None` where the model skipped a line.
+pub async fn refine_song(
+    lines: &[String],
+    title: &str,
+    artist: &str,
+    config: &crate::config::TranslationConfig,
+) -> Result<Vec<Option<String>>, anyhow::Error> {
+    let program = match config.refine_backend.as_str() {
+        program @ ("agy" | "hermes" | "claude") => program,
+        other => anyhow::bail!("unknown refine backend {other}"),
+    };
+
+    let numbered = lines
+        .iter()
+        .enumerate()
+        .map(|(i, line)| format!("{}: {line}", i + 1))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let prompt = REFINE_PROMPT
+        .replace("{title}", title)
+        .replace("{artist}", artist)
+        .replace("{lines}", &numbered);
+
+    let mut command = tokio::process::Command::new(program);
+    command
+        .arg("-p")
+        .arg(prompt)
+        .stdin(std::process::Stdio::null())
+        // keep the agent away from any project it could pick up from the cwd
+        .current_dir(std::env::temp_dir())
+        .kill_on_drop(true);
+
+    let output = tokio::time::timeout(
+        Duration::from_secs(config.refine_timeout_s),
+        command.output(),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("{program} took more than {}s", config.refine_timeout_s))??;
+    if !output.status.success() {
+        anyhow::bail!("{program} exited with {}", output.status);
+    }
+
+    let refined = parse_numbered(&String::from_utf8_lossy(&output.stdout), lines.len());
+
+    // a reply that lost most lines is not a translation of this song
+    let filled = refined.iter().filter(|line| line.is_some()).count();
+    if filled * 5 < lines.len() * 4 {
+        anyhow::bail!("{program} returned {filled} of {} lines", lines.len());
+    }
+
+    info!("{program} refined {filled} lines");
+    Ok(refined)
+}
+
+/// Parse `NUMBER: TEXT` lines (tolerating markdown bullets and `NUMBER.`)
+/// into `count` slots, `None` where a number is missing.
+fn parse_numbered(reply: &str, count: usize) -> Vec<Option<String>> {
+    let mut parsed = vec![None; count];
+    for line in reply.lines() {
+        let line = line.trim().trim_start_matches(['*', '-', ' ']);
+        let Some((idx, text)) = line.split_once([':', '.']) else {
+            continue;
+        };
+        let (Ok(idx), text) = (idx.trim().trim_end_matches('*').parse::<usize>(), text.trim()) else {
+            continue;
+        };
+        if (1..=count).contains(&idx) && !text.is_empty() {
+            parsed[idx - 1] = Some(text.trim_start_matches("**").trim().to_string());
+        }
+    }
+    parsed
+}
+
 async fn translate_cli_fallback(lines: &[String], cli_name: &str) -> Vec<String> {
     let numbered_prompt = lines
         .iter()
@@ -324,6 +413,16 @@ mod tests {
         assert!(is_credit_line("人声 : Alexandria"));
         assert!(is_credit_line("作词：周杰伦"));
         assert!(is_credit_line("制作人/编曲 : Someone"));
+    }
+
+    #[test]
+    fn numbered_reply() {
+        let reply = "Ecco:\n1: Cazzo, era la mia ora\n**2.** Venderei l'anima: marcia\n- 4: Spacca tutto\n9: fuori range";
+        let parsed = super::parse_numbered(reply, 4);
+        assert_eq!(parsed[0].as_deref(), Some("Cazzo, era la mia ora"));
+        assert_eq!(parsed[1].as_deref(), Some("Venderei l'anima: marcia"));
+        assert_eq!(parsed[2], None);
+        assert_eq!(parsed[3].as_deref(), Some("Spacca tutto"));
     }
 
     #[test]

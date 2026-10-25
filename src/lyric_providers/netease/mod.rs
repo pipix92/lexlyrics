@@ -52,6 +52,7 @@ impl super::LyricProvider for Netease {
             Ok(LyricStore {
                 lyric: lyric_resp.lrc.map(|l| l.lyric),
                 tlyric: lyric_resp.tlyric.map(|l| l.lyric),
+                estimated: false,
             })
         })
         .await?
