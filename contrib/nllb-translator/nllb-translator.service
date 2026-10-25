@@ -1,0 +1,13 @@
+[Unit]
+Description=NLLB-200 offline translation daemon for LexLyrics (CUDA if available)
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 %h/.local/bin/nllb-translation-server.py
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target

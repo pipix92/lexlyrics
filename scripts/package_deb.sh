@@ -24,8 +24,8 @@ mkdir -p "$PKG_DIR/usr/share/glib-2.0/schemas"
 # Compile release binary incrementally in container
 echo "==> Compiling release binary in container..."
 podman run --rm \
-  -v /home/lex/.cargo:/root/.cargo \
-  -v /home/lex/.rustup:/root/.rustup:ro \
+  -v "$HOME/.cargo:/root/.cargo" \
+  -v "$HOME/.rustup:/root/.rustup:ro" \
   -v "$ROOT_DIR:/workspace" \
   -w /workspace \
   -e WAYLYRICS_THEME_PRESETS_DIR=/usr/share/lexlyrics/themes \
@@ -38,10 +38,7 @@ chmod 755 "$PKG_DIR/usr/bin/lexlyrics"
 ln -sf lexlyrics "$PKG_DIR/usr/bin/waylyrics"
 
 # 2. Icons
-ICON_SRC="/home/lex/.local/share/icons/lexlyrics-cosmic-mononoki-title.png"
-if [ ! -f "$ICON_SRC" ]; then
-    ICON_SRC="/home/lex/.local/share/icons/lexlyrics.png"
-fi
+ICON_SRC="$ROOT_DIR/res/icons/lexlyrics.png"
 cp "$ICON_SRC" "$PKG_DIR/usr/share/icons/hicolor/512x512/apps/lexlyrics.png"
 cp "$ICON_SRC" "$PKG_DIR/usr/share/pixmaps/lexlyrics.png"
 ln -sf lexlyrics.png "$PKG_DIR/usr/share/icons/hicolor/512x512/apps/io.github.waylyrics.Waylyrics.png"
