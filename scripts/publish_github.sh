@@ -22,7 +22,14 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 BRANCH="$(git branch --show-current)"
 
 echo "==> Leggo GITHUB_TOKEN dal vault"
-TOKEN="$(python3 "$VAULT" get GITHUB_TOKEN | grep -oE '(ghp_|github_pat_|gho_)[A-Za-z0-9_]+' | tail -n1 || true)"
+VAULT_OUT="$(python3 "$VAULT" get GITHUB_TOKEN || true)"
+if [[ "$VAULT_OUT" == "Nessuna chiave"* ]]; then
+    echo "Il vault non ha una chiave GITHUB_TOKEN (vedi: python3 $VAULT list)." >&2
+    exit 1
+fi
+# the stored value may be the bare token or a "GITHUB_TOKEN=..." line
+TOKEN="$(printf '%s\n' "$VAULT_OUT" | sed -n 's/^[[:space:]]*\(export[[:space:]]\+\)\?\(GITHUB_TOKEN[[:space:]]*=[[:space:]]*\)\?["'\'']\?\([^"'\''[:space:]]\+\).*/\3/p' | tail -n1)"
+unset VAULT_OUT
 if [ -z "$TOKEN" ]; then
     echo "Token non trovato nell'output del vault." >&2
     exit 1
@@ -31,6 +38,13 @@ fi
 api() {
     curl -fsS -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" "$@"
 }
+
+LOGIN="$(api https://api.github.com/user 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["login"])' 2>/dev/null || true)"
+if [ -z "$LOGIN" ]; then
+    echo "GitHub rifiuta il token (scaduto o revocato?): creane uno nuovo con permesso 'repo' e salvalo con vault.py add GITHUB_TOKEN <token>." >&2
+    exit 1
+fi
+echo "==> Autenticato come $LOGIN"
 
 if api "https://api.github.com/repos/$OWNER/$REPO" >/dev/null 2>&1; then
     echo "==> Il repository $OWNER/$REPO esiste già"
