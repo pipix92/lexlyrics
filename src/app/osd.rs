@@ -188,7 +188,62 @@ mod backend {
     }
 }
 
-#[cfg(not(all(unix, not(target_os = "macos"))))]
+#[cfg(target_os = "windows")]
+mod backend {
+    use std::ffi::c_void;
+    use windows::Win32::Foundation::{HWND, POINT, RECT};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetCursorPos, GetWindowRect, SetWindowPos, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE,
+        SWP_NOSIZE,
+    };
+
+    pub fn set_override_redirect(handle: u64) -> bool {
+        let hwnd = HWND(handle as *mut c_void);
+        unsafe {
+            SetWindowPos(
+                hwnd,
+                Some(HWND_TOPMOST),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            )
+            .is_ok()
+        }
+    }
+
+    pub fn move_to(handle: u64, x: i32, y: i32) -> bool {
+        let hwnd = HWND(handle as *mut c_void);
+        unsafe {
+            SetWindowPos(
+                hwnd,
+                Some(HWND_TOPMOST),
+                x,
+                y,
+                0,
+                0,
+                SWP_NOSIZE | SWP_NOACTIVATE,
+            )
+            .is_ok()
+        }
+    }
+
+    pub fn absolute_position(handle: u64) -> Option<(i32, i32)> {
+        let hwnd = HWND(handle as *mut c_void);
+        let mut rect = RECT::default();
+        unsafe { GetWindowRect(hwnd, &mut rect).ok()? };
+        Some((rect.left, rect.top))
+    }
+
+    pub fn pointer() -> Option<(i32, i32, bool)> {
+        let mut pt = POINT::default();
+        unsafe { GetCursorPos(&mut pt).ok()? };
+        Some((pt.x, pt.y, true))
+    }
+}
+
+#[cfg(target_os = "macos")]
 mod backend {
     pub fn set_override_redirect(_xid: u64) -> bool {
         false
@@ -211,7 +266,13 @@ fn xid(window: &Window) -> Option<u64> {
     Some(surface.xid())
 }
 
-#[cfg(not(all(unix, not(target_os = "macos"))))]
+#[cfg(target_os = "windows")]
+fn xid(window: &Window) -> Option<u64> {
+    let surface = window.surface()?.downcast::<gdk4_win32::Win32Surface>().ok()?;
+    Some(surface.handle().0 as u64)
+}
+
+#[cfg(target_os = "macos")]
 fn xid(_window: &Window) -> Option<u64> {
     None
 }
@@ -276,12 +337,25 @@ fn target_monitor(window: &Window) -> Option<gtk::gdk::Monitor> {
         .or_else(|| display.monitors().item(0).and_downcast())
 }
 
+/// Geometry of the monitor the OSD/HUD belongs on, falling back to 1920x1080.
+pub fn monitor_geometry(window: &Window) -> gtk::gdk::Rectangle {
+    target_monitor(window)
+        .map(|monitor| monitor.geometry())
+        .unwrap_or_else(|| gtk::gdk::Rectangle::new(0, 0, 1920, 1080))
+}
+
+/// Clamp `(x, y)` so a window of `(width, height)` stays visible inside its monitor.
+pub fn clamp_to_monitor(window: &Window, x: i32, y: i32, width: i32, height: i32) -> (i32, i32) {
+    let geom = monitor_geometry(window);
+    let max_x = (geom.x() + geom.width() - width).max(geom.x());
+    let max_y = (geom.y() + geom.height() - height).max(geom.y());
+    (x.clamp(geom.x(), max_x), y.clamp(geom.y(), max_y))
+}
+
 /// Bottom-centered placement on the primary monitor, keeping `dock_margin`
 /// pixels of clearance for the dock.
 pub fn bottom_center(window: &Window, width: i32, height: i32, dock_margin: i32) -> (i32, i32) {
-    let geometry = target_monitor(window)
-        .map(|monitor| monitor.geometry())
-        .unwrap_or_else(|| gtk::gdk::Rectangle::new(0, 0, 1920, 1080));
+    let geometry = monitor_geometry(window);
 
     let x = geometry.x() + (geometry.width() - width).max(0) / 2;
     let y = geometry.y() + (geometry.height() - height - dock_margin).max(0);

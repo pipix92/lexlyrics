@@ -15,73 +15,83 @@ pub fn clean_lyric(window: &app::Window) {
     window.imp().lyric_offset_ms.set(0);
 }
 
-/// both singer and album are optional non-empty string
-pub fn match_likely_lyric<'a>(
+/// Rank all candidates from a provider:
+/// - Candidates matching track duration within `length_toleration_ms` come first
+///   (weight `0` with fuzzy score when artist/album is known, `1` otherwise).
+/// - Remaining candidates follow ordered by fuzzy match score (weight `2` if
+///   fuzzy matched, `3` in original order).
+pub fn rank_likely_lyrics<'a>(
     album: Option<&str>,
     title: &str,
     singer: Option<&str>,
     length: Option<Duration>,
     search_result: &'a [SongInfo],
     length_toleration_ms: u128,
-) -> Option<(&'a str, u8)> {
-    length
-        .and_then(|leng| {
-            search_result
-                .iter()
-                .find(|SongInfo { length, .. }| {
-                    length.as_millis().abs_diff(leng.as_millis()) <= length_toleration_ms
-                })
-                .map(|song| (song, 1))
+) -> Vec<(&'a str, u8)> {
+    if search_result.is_empty() {
+        return Vec::new();
+    }
+
+    fn t2s(s: impl AsRef<str>) -> Vec<char> {
+        zhconv::zhconv(s.as_ref(), zhconv::Variant::ZhHans)
+            .chars()
+            .collect()
+    }
+
+    let can_fuzzy = album.is_some() || singer.is_some();
+    let o_title = can_fuzzy.then(|| t2s(title));
+    let o_album = album.map(t2s);
+    let o_singer = singer.map(t2s);
+
+    let mut scored: Vec<(usize, &SongInfo, u8, i64)> = search_result
+        .iter()
+        .enumerate()
+        .map(|(idx, song)| {
+            let len_matches = length.is_some_and(|leng| {
+                song.length.as_millis().abs_diff(leng.as_millis()) <= length_toleration_ms
+            });
+            let likelihood = if let Some(ref o_title) = o_title {
+                let r_title = t2s(&song.title);
+                let r_album = song.album.as_ref().map(t2s);
+                let r_singer = t2s(&song.singer);
+                let score = fuzzy_match_song(
+                    o_title,
+                    o_album.as_deref(),
+                    o_singer.as_deref(),
+                    &r_title,
+                    r_album.as_deref(),
+                    &r_singer,
+                );
+                if score.is_nan() {
+                    0
+                } else {
+                    (score * 1024.0) as i64
+                }
+            } else {
+                0
+            };
+
+            let weight = match (len_matches, can_fuzzy) {
+                (true, true) => 0,
+                (true, false) => 1,
+                (false, true) => 2,
+                (false, false) => 3,
+            };
+            trace!("rank w={weight} p={likelihood} for {song:?}");
+            (idx, song, weight, likelihood)
         })
-        .or_else(|| {
-            // if we get only title, it is likely
-            // the player is giving messy title, which is not applicable
-            // to fuzzy-match. so we skip fuzzy-match and use
-            // the first result instead
-            if album.is_none() && singer.is_none() {
-                return None;
-            }
+        .collect();
 
-            fn t2s(s: impl AsRef<str>) -> Vec<char> {
-                zhconv::zhconv(s.as_ref(), zhconv::Variant::ZhHans)
-                    .chars()
-                    .collect()
-            }
+    scored.sort_by(|a, b| {
+        a.2.cmp(&b.2)
+            .then_with(|| b.3.cmp(&a.3))
+            .then_with(|| a.0.cmp(&b.0))
+    });
 
-            let o_title = t2s(title);
-            let o_album = album.map(t2s);
-            let o_singer = singer.map(t2s);
-
-            search_result
-                .iter()
-                .map(
-                    |s @ SongInfo {
-                         title: _title,
-                         singer: _singer,
-                         album: _album,
-                         ..
-                     }| {
-                        let r_title = t2s(_title);
-                        let r_album = _album.as_ref().map(t2s);
-                        let r_singer = t2s(_singer);
-
-                        let likelihood = fuzzy_match_song(
-                            &o_title,
-                            o_album.as_deref(),
-                            o_singer.as_deref(),
-                            &r_title,
-                            r_album.as_deref(),
-                            &r_singer,
-                        );
-                        trace!("p={likelihood} for {s:?}");
-                        (s, likelihood)
-                    },
-                )
-                .max_by_key(|(_, likelihood)| (likelihood * 1024.) as u32)
-                .map(|(s, _)| (s, 0))
-        })
-        .or(search_result.first().map(|song| (song, 2)))
-        .map(|(song, weight)| (song.id.as_str(), weight))
+    scored
+        .into_iter()
+        .map(|(_, song, weight, _)| (song.id.as_str(), weight))
+        .collect()
 }
 
 pub fn set_current_lyric(lyric: LyricState) {

@@ -12,7 +12,7 @@ use crate::lyric_providers::LyricOwned;
 use crate::sync::{LyricState, TrackMeta, LYRIC};
 use crate::{app, tokio_spawn, LYRIC_PROVIDERS};
 
-use crate::sync::utils::{self, match_likely_lyric};
+use crate::sync::utils::{self, rank_likely_lyrics};
 
 pub(crate) use tricks::LyricHint;
 
@@ -71,7 +71,7 @@ pub async fn fetch_lyric(track_meta: &TrackMeta, window: &app::Window) -> Result
                     .search_song_detailed(album.unwrap_or_default(), &artists, title)
                     .await;
                 search_result.map(|songs| {
-                    match_likely_lyric(
+                    rank_likely_lyrics(
                         album,
                         title,
                         singer.as_deref(),
@@ -79,7 +79,10 @@ pub async fn fetch_lyric(track_meta: &TrackMeta, window: &app::Window) -> Result
                         &songs,
                         length_toleration_ms,
                     )
+                    .into_iter()
+                    .take(4)
                     .map(|(id, weight)| (id.to_owned(), weight, idx))
+                    .collect::<Vec<_>>()
                 })
             });
         }
@@ -88,10 +91,10 @@ pub async fn fetch_lyric(track_meta: &TrackMeta, window: &app::Window) -> Result
         let title = title.clone();
         let mut results = vec![];
         while let Some(Ok(re)) = set.join_next().await {
-            let Ok(Some((id, weight, idx))) = re else {
+            let Ok(candidates) = re else {
                 continue;
             };
-            results.push((id, weight, idx));
+            results.extend(candidates);
         }
         (results, artists_str, title)
     })
@@ -106,7 +109,7 @@ pub async fn fetch_lyric(track_meta: &TrackMeta, window: &app::Window) -> Result
         .get()
         .expect("lyric providers should be initialized");
 
-    results.sort_by_key(|(_, _, weight)| *weight);
+    results.sort_by_key(|(_, weight, platform_idx)| (*weight, *platform_idx));
 
     // estimated timing is only a last resort: keep looking for a synced match
     let mut estimated = None;

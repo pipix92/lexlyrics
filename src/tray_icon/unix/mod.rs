@@ -464,6 +464,9 @@ fn open_theme_tool() {
 /// saved and LexLyrics restarts into it.
 fn set_window_mode(fullscreen: bool) {
     crate::config::save_bool("start-fullscreen", fullscreen);
+    // OSD and Fullscreen HUD interpret lyric-offset-x/y in different coordinate
+    // spaces, so reset to automatic bottom-center placement on mode switch.
+    crate::config::save_lyric_offset(0, 0);
     restart_myself();
 }
 

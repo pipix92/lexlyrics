@@ -1,0 +1,140 @@
+name: Release (Linux & Windows)
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    name: Linux x86_64 (.deb & .tar.gz)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install GTK4 & build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-4-dev libdbus-1-dev libssl-dev libx11-dev pkg-config gettext glib2.0-bin dpkg-dev
+      - uses: Swatinem/rust-cache@v2
+      - name: Run unit tests
+        run: cargo test --lib --features offline-test
+      - name: Build release binary
+        env:
+          WAYLYRICS_THEME_PRESETS_DIR: /usr/share/lexlyrics/themes
+        run: cargo build --release
+      - name: Package .deb and .tar.gz
+        run: |
+          VERSION="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n1)"
+          PKG="/tmp/lexlyrics_${VERSION}-1_amd64"
+          mkdir -p "$PKG/DEBIAN" "$PKG/usr/bin" "$PKG/usr/share/applications" \
+            "$PKG/usr/share/icons/hicolor/512x512/apps" "$PKG/usr/share/lexlyrics/themes" \
+            "$PKG/usr/share/pixmaps" "$PKG/usr/share/doc/lexlyrics" "$PKG/usr/share/glib-2.0/schemas"
+          install -m755 target/release/lexlyrics "$PKG/usr/bin/lexlyrics"
+          ln -sf lexlyrics "$PKG/usr/bin/waylyrics"
+          install -m755 scripts/lexlyrics-theme "$PKG/usr/bin/lexlyrics-theme"
+          cp res/icons/lexlyrics.png "$PKG/usr/share/icons/hicolor/512x512/apps/lexlyrics.png"
+          cp res/icons/lexlyrics.png "$PKG/usr/share/pixmaps/lexlyrics.png"
+          ln -sf lexlyrics.png "$PKG/usr/share/icons/hicolor/512x512/apps/io.github.waylyrics.Waylyrics.png"
+          for icon in res/icons/hicolor/*/apps/lexlyrics-tray.*; do
+            rel="${icon#res/icons/}"
+            install -Dm644 "$icon" "$PKG/usr/share/icons/$rel"
+          done
+          cp -r themes/* "$PKG/usr/share/lexlyrics/themes/"
+          cp metainfo/io.github.waylyrics.Waylyrics.gschema.xml "$PKG/usr/share/glib-2.0/schemas/"
+          cp README.md "$PKG/usr/share/doc/lexlyrics/"
+          cp LICENSE "$PKG/usr/share/doc/lexlyrics/copyright"
+          cat > "$PKG/DEBIAN/control" <<EOF
+          Package: lexlyrics
+          Version: ${VERSION}-1
+          Section: sound
+          Priority: optional
+          Architecture: amd64
+          Depends: libgtk-4-1, libcairo2, libglib2.0-0, libssl3, libdbus-1-3, libx11-6
+          Maintainer: Lex <lex@debian-pc>
+          Description: LexLyrics - Desktop Karaoke Lyrics with Live Neural Translation
+          EOF
+          sed -i 's/^          //' "$PKG/DEBIAN/control"
+          dpkg-deb --root-owner-group --build "$PKG" "lexlyrics_${VERSION}-1_amd64.deb"
+
+          TAR_DIR="/tmp/lexlyrics-v${VERSION}-linux-x86_64"
+          mkdir -p "$TAR_DIR/share/glib-2.0/schemas"
+          cp target/release/lexlyrics scripts/lexlyrics-theme README.md LICENSE "$TAR_DIR/"
+          cp -r themes contrib "$TAR_DIR/"
+          cp metainfo/io.github.waylyrics.Waylyrics.gschema.xml "$TAR_DIR/share/glib-2.0/schemas/"
+          glib-compile-schemas "$TAR_DIR/share/glib-2.0/schemas"
+          tar -czf "lexlyrics-v${VERSION}-linux-x86_64.tar.gz" -C /tmp "lexlyrics-v${VERSION}-linux-x86_64"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-packages
+          path: |
+            lexlyrics_*_amd64.deb
+            lexlyrics-*-linux-x86_64.tar.gz
+
+  windows:
+    name: Windows x86_64 (.zip)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-toolchain
+            mingw-w64-ucrt-x86_64-rust
+            mingw-w64-ucrt-x86_64-gtk4
+            mingw-w64-ucrt-x86_64-gettext-runtime
+            mingw-w64-ucrt-x86_64-gettext-tools
+            mingw-w64-ucrt-x86_64-librsvg
+            mingw-w64-ucrt-x86_64-pkgconf
+            zip
+      - name: Build Windows release
+        env:
+          WAYLYRICS_THEME_PRESETS_DIR: themes
+          GETTEXT_DIR: C:/msys64/ucrt64
+          RUSTFLAGS: -C link-arg=-Wl,--allow-multiple-definition
+        run: cargo build --release
+      - name: Bundle portable Windows .zip
+        run: |
+          VERSION="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n1)"
+          STAGE="lexlyrics-v${VERSION}-windows-x86_64"
+          mkdir -p "$STAGE/themes" "$STAGE/share/glib-2.0/schemas" "$STAGE/share/icons" "$STAGE/lib"
+          cp target/release/lexlyrics.exe "$STAGE/"
+          ldd target/release/lexlyrics.exe | awk '/\/ucrt64\/bin\// {print $3}' | xargs -I{} cp -n {} "$STAGE/"
+          cp /ucrt64/bin/gdbus.exe "$STAGE/" || true
+          cp -r /ucrt64/lib/gdk-pixbuf-2.0 "$STAGE/lib/" || true
+          cp -r /ucrt64/share/icons/Adwaita "$STAGE/share/icons/" || true
+          cp -r themes/* "$STAGE/themes/"
+          cp metainfo/io.github.waylyrics.Waylyrics.gschema.xml "$STAGE/share/glib-2.0/schemas/"
+          glib-compile-schemas "$STAGE/share/glib-2.0/schemas"
+          cp -r contrib README.md LICENSE "$STAGE/"
+          zip -qr "${STAGE}.zip" "$STAGE"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-package
+          path: lexlyrics-*-windows-x86_64.zip
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: docs/release-notes/${{ github.ref_name }}.md
+          files: dist/*

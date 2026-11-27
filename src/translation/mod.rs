@@ -73,6 +73,40 @@ pub fn is_italian(target_lang: &str) -> bool {
     matches!(target_lang, "ita_Latn" | "it" | "ita")
 }
 
+/// Heuristic check to skip translating lyrics that are already in Italian.
+pub fn is_likely_italian_lyrics(lines: &[&str]) -> bool {
+    const IT_STOPWORDS: &[&str] = &[
+        "che", "non", "per", "con", "una", "sono", "nella", "della", "tutto", "quando", "come",
+        "più", "anche", "questo", "questa", "perché", "occhi", "cuore", "notte", "sempre",
+        "ancora", "solo", "vita", "amore", "senza", "dentro", "fuori", "ogni", "mio", "mia", "tuo",
+        "tua", "suo", "sua", "noi", "voi", "loro", "alla", "dalla", "sulla",
+    ];
+    const EN_STOPWORDS: &[&str] = &[
+        "the", "and", "you", "that", "with", "for", "your", "from", "have", "this", "what",
+        "when", "where", "just", "like", "know", "down", "back", "never",
+    ];
+
+    let mut it_hits: usize = 0;
+    let mut en_hits: usize = 0;
+
+    for line in lines {
+        for word in line.split(|c: char| !c.is_alphabetic()) {
+            if word.is_empty() {
+                continue;
+            }
+            let lower = word.to_lowercase();
+            if IT_STOPWORDS.contains(&lower.as_str()) {
+                it_hits += 1;
+            }
+            if EN_STOPWORDS.contains(&lower.as_str()) {
+                en_hits += 1;
+            }
+        }
+    }
+
+    it_hits >= 4 && it_hits > en_hits * 2
+}
+
 /// ISO 639-1 code for the external API from an NLLB code like `deu_Latn`;
 /// ISO codes pass through untouched.
 pub fn iso_code(target_lang: &str) -> String {
@@ -300,6 +334,8 @@ pub async fn refine_song(
         .replace("{lines}", &numbered);
 
     let mut command = tokio::process::Command::new(program);
+    #[cfg(windows)]
+    command.creation_flags(0x08000000); // CREATE_NO_WINDOW
     command
         .arg("-p")
         .arg(prompt)
@@ -365,23 +401,15 @@ async fn translate_cli_fallback(lines: &[String], cli_name: &str) -> Vec<String>
         numbered_prompt
     );
 
-    let output = match cli_name {
-        "claude" => tokio::process::Command::new("claude")
-            .arg("-p")
-            .arg(&prompt)
-            .output()
-            .await,
-        "hermes" => tokio::process::Command::new("hermes")
-            .arg("-p")
-            .arg(&prompt)
-            .output()
-            .await,
-        _ => tokio::process::Command::new("agy")
-            .arg("-p")
-            .arg(&prompt)
-            .output()
-            .await,
+    let bin = match cli_name {
+        "claude" => "claude",
+        "hermes" => "hermes",
+        _ => "agy",
     };
+    let mut cmd = tokio::process::Command::new(bin);
+    #[cfg(windows)]
+    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    let output = cmd.arg("-p").arg(&prompt).output().await;
 
     if let Ok(out) = output {
         if out.status.success() {
@@ -431,5 +459,19 @@ mod tests {
         assert!(!is_credit_line("Please step in line"));
         assert!(!is_credit_line("我爱你：永远不变的心意在这里陪着你走过"));
         assert!(!is_credit_line(""));
+    }
+
+    #[test]
+    fn detects_italian_lyrics() {
+        assert!(super::is_likely_italian_lyrics(&[
+            "Non so più quando torna la notte",
+            "Senza di te tutto il mio cuore è solo",
+            "Ma nella vita resto sempre con te",
+        ]));
+        assert!(!super::is_likely_italian_lyrics(&[
+            "Guided only by the gallop of his trusty stallion",
+            "And the starlit desert",
+            "You know that I will never come back for your love",
+        ]));
     }
 }

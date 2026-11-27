@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
 # =====================================================================
-# LexLyrics Debian Packaging Script
-# Generates .deb and .tar.gz release bundles for Linux
+# LexLyrics Debian & Portable Linux Packaging Script
+# Generates .deb and .tar.gz release bundles for Linux (x86_64)
 # =====================================================================
-set -e
+set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PKG_DIR="/tmp/lexlyrics_0.5.0-1_amd64"
-DEB_FILE="$ROOT_DIR/lexlyrics_0.5.0-1_amd64.deb"
-TAR_FILE="$ROOT_DIR/lexlyrics-v0.5.0-linux-x86_64.tar.gz"
+VERSION="$(sed -n 's/^version = "\([^"]*\)"/\1/p' "$ROOT_DIR/Cargo.toml" | head -n1)"
+PKG_DIR="/tmp/lexlyrics_${VERSION}-1_amd64"
+DEB_FILE="$ROOT_DIR/lexlyrics_${VERSION}-1_amd64.deb"
+TAR_NAME="lexlyrics-v${VERSION}-linux-x86_64"
+TAR_FILE="$ROOT_DIR/${TAR_NAME}.tar.gz"
 
-echo "==> Preparing package directory structure..."
+echo "==> Packaging LexLyrics v${VERSION} for Linux..."
 rm -rf "$PKG_DIR"
 mkdir -p "$PKG_DIR/DEBIAN"
 mkdir -p "$PKG_DIR/usr/bin"
@@ -21,8 +23,7 @@ mkdir -p "$PKG_DIR/usr/share/pixmaps"
 mkdir -p "$PKG_DIR/usr/share/doc/lexlyrics"
 mkdir -p "$PKG_DIR/usr/share/glib-2.0/schemas"
 
-# Compile release binary incrementally in container
-echo "==> Compiling release binary in container..."
+echo "==> Compiling release binary in rootless Podman container..."
 podman run --rm \
   -v "$HOME/.cargo:/root/.cargo" \
   -v "$HOME/.rustup:/root/.rustup:ro" \
@@ -43,7 +44,6 @@ cp "$ICON_SRC" "$PKG_DIR/usr/share/icons/hicolor/512x512/apps/lexlyrics.png"
 cp "$ICON_SRC" "$PKG_DIR/usr/share/pixmaps/lexlyrics.png"
 ln -sf lexlyrics.png "$PKG_DIR/usr/share/icons/hicolor/512x512/apps/io.github.waylyrics.Waylyrics.png"
 
-# tray icon: double music note, see scripts/make_tray_icon.py
 for icon in "$ROOT_DIR"/res/icons/hicolor/*/apps/lexlyrics-tray.*; do
     rel="${icon#"$ROOT_DIR/res/icons/"}"
     install -Dm644 "$icon" "$PKG_DIR/usr/share/icons/$rel"
@@ -73,33 +73,30 @@ EOF
 
 cp "$PKG_DIR/usr/share/applications/lexlyrics.desktop" "$PKG_DIR/usr/share/applications/io.github.waylyrics.Waylyrics.desktop"
 
-# 5. Documentation
+# 5. Documentation & GSettings Schema
 cp "$ROOT_DIR/README.md" "$PKG_DIR/usr/share/doc/lexlyrics/"
 cp "$ROOT_DIR/LICENSE" "$PKG_DIR/usr/share/doc/lexlyrics/copyright"
-
 cp "$ROOT_DIR/metainfo/io.github.waylyrics.Waylyrics.gschema.xml" "$PKG_DIR/usr/share/glib-2.0/schemas/"
 
 # 6. Control File
-cat << "EOF" > "$PKG_DIR/DEBIAN/control"
+cat << EOF > "$PKG_DIR/DEBIAN/control"
 Package: lexlyrics
-Version: 0.5.0-1
+Version: ${VERSION}-1
 Section: sound
 Priority: optional
 Architecture: amd64
 Depends: libgtk-4-1, libcairo2, libglib2.0-0, libssl3, libdbus-1-3, libx11-6
 Recommends: python3 (>= 3.11), xwayland
 Maintainer: Lex <lex@debian-pc>
-Description: LexLyrics - Desktop Karaoke Lyrics for Linux with Neural Offline Translation
- Fork avanzato di Waylyrics per Debian/Linux.
+Description: LexLyrics - Desktop Karaoke Lyrics with Live Neural Translation
+ Fork di Waylyrics con traduzione italiana in tempo reale (NLLB-200 + LLM).
  Caratteristiche:
-  - Scorrimento karaoke a 4 righe verso l alto
-  - Traduzione neurale offline multilingue NLLB-200 (Meta 600M)
-  - VRAM tiering dinamico con accelerazione CUDA RTX 3050
-  - Filtro anti-cinese automatico su LRCLib e NetEase
-  - Barra OSD compatta sopra la dock (default) o HUD a schermo intero
-  - Spostamento con Alt+Mouse Drag, posizione ricordata in config.toml
-  - Icona tray a doppia nota con personalizzazione di testo e finestra
-  - Icona cosmica con Mononoki Nerd Font
+  - Barra OSD compatta in vetro (spostabile, ridimensionabile, zoom Alt+rotella)
+  - HUD a schermo intero non intrusivo con click-through fuori dal testo ed Esc/F11
+  - Traduzione veloce offline NLLB-200 con fallback automatico GPU -> CPU
+  - Rifinitura naturale via LLM (agy, hermes, claude) e salto brani gia' in italiano
+  - Pulizia titoli Spotify/LRCLib, filtro crediti cinesi NetEase e stima tempi
+  - Icona tray a doppia nota con editor TUI lexlyrics-theme
 EOF
 
 # 7. Postinst script
@@ -123,19 +120,22 @@ echo "==> Building .deb package..."
 dpkg-deb --root-owner-group --build "$PKG_DIR" "$DEB_FILE"
 
 echo "==> Building standalone .tar.gz bundle..."
-TAR_TMP="/tmp/lexlyrics-v0.5.0-linux-x86_64"
+TAR_TMP="/tmp/${TAR_NAME}"
 rm -rf "$TAR_TMP"
-mkdir -p "$TAR_TMP"
+mkdir -p "$TAR_TMP/share/glib-2.0/schemas"
 cp "$PKG_DIR/usr/bin/lexlyrics" "$TAR_TMP/"
 cp "$PKG_DIR/usr/bin/lexlyrics-theme" "$TAR_TMP/"
 cp -r "$ROOT_DIR/res/icons" "$TAR_TMP/icons"
 cp -r "$PKG_DIR/usr/share/lexlyrics/themes" "$TAR_TMP/"
+cp -r "$ROOT_DIR/contrib" "$TAR_TMP/"
+cp "$ROOT_DIR/metainfo/io.github.waylyrics.Waylyrics.gschema.xml" "$TAR_TMP/share/glib-2.0/schemas/"
+glib-compile-schemas "$TAR_TMP/share/glib-2.0/schemas"
 cp "$ICON_SRC" "$TAR_TMP/lexlyrics.png"
 cp "$PKG_DIR/usr/share/applications/lexlyrics.desktop" "$TAR_TMP/"
 cp "$ROOT_DIR/README.md" "$TAR_TMP/"
 cp "$ROOT_DIR/LICENSE" "$TAR_TMP/"
-tar -czf "$TAR_FILE" -C /tmp lexlyrics-v0.5.0-linux-x86_64
+tar -czf "$TAR_FILE" -C /tmp "$TAR_NAME"
 
 echo "==> Packaging complete:"
-echo "    - Debian Package: $DEB_FILE ($(du -h "$DEB_FILE" | cut -f1))"
+echo "    - Debian Package:   $DEB_FILE ($(du -h "$DEB_FILE" | cut -f1))"
 echo "    - Portable Tarball: $TAR_FILE ($(du -h "$TAR_FILE" | cut -f1))"

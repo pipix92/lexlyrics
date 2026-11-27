@@ -251,7 +251,7 @@ impl Default for TranslationConfig {
             backend: "nllb".into(),
             nllb_url: "http://127.0.0.1:18436/translate".into(),
             target_lang: "ita_Latn".into(),
-            timeout_ms: 2500,
+            timeout_ms: 8000,
             api_url: "https://api.mymemory.translated.net/get".into(),
             api_email: String::new(),
             refine_backend: "agy".into(),

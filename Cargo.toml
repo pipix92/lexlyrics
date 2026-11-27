@@ -1,8 +1,8 @@
 [package]
 name = "waylyrics"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
-description = "LexLyrics - Desktop Karaoke Lyrics for Linux with Neural Offline Translation"
+description = "LexLyrics - Desktop Karaoke Lyrics for Linux & Windows with Neural Offline Translation"
 authors = ["Lex", "mokurin000"]
 license-file = "LICENSE"
 rust-version = "1.80.0"

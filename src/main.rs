@@ -1,3 +1,8 @@
+#![cfg_attr(
+    all(not(debug_assertions), target_os = "windows"),
+    windows_subsystem = "windows"
+)]
+
 use std::fs;
 use std::ops::ControlFlow;
 use std::path::PathBuf;
@@ -17,9 +22,10 @@ use tracing_subscriber::prelude::*;
 use tracing_subscriber::{fmt, Registry};
 
 use waylyrics::app::actions::{
-    register_reload_theme, register_reset_position, register_set_display_mode, register_set_label,
+    register_exit_fullscreen, register_reload_theme, register_reset_position,
+    register_set_context_lines, register_set_display_mode, register_set_label,
     register_set_lyric_align, register_switch_decoration, register_switch_passthrough,
-    register_set_context_lines, register_zoom, UIAction, UI_ACTION,
+    register_zoom, UIAction, UI_ACTION,
 };
 use waylyrics::app::{self, build_main_window};
 
@@ -51,6 +57,22 @@ fn main() -> Result<glib::ExitCode> {
     #[cfg(target_os = "linux")]
     if std::env::var_os("GDK_BACKEND").is_none() {
         std::env::set_var("GDK_BACKEND", "x11");
+    }
+
+    // Portable bundles (Windows .zip / Linux .tar.gz) ship `gschemas.compiled`
+    // next to the executable: point GLib at it when no system schema dir is set.
+    if std::env::var_os("GSETTINGS_SCHEMA_DIR").is_none() {
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(exe_dir) = exe.parent() {
+                for rel in ["share/glib-2.0/schemas", "../share/glib-2.0/schemas"] {
+                    let candidate = exe_dir.join(rel);
+                    if candidate.join("gschemas.compiled").exists() {
+                        std::env::set_var("GSETTINGS_SCHEMA_DIR", &candidate);
+                        break;
+                    }
+                }
+            }
+        }
     }
 
     #[cfg(feature = "i18n")]
@@ -256,16 +278,26 @@ fn build_ui(app: &Application) -> Result<()> {
     let lyric_update_interval = parse_time(&lyric_update_interval)?;
 
     let theme_file_name = format!("{theme}.css");
-    let user_theme = theme_dir.join(&theme_file_name);
-    let global_theme = THEME_PRESETS_DIR.map(|d| PathBuf::from(d).join(&theme_file_name));
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(PathBuf::from));
+    let find_theme = |file_name: &str| -> Option<PathBuf> {
+        let mut candidates = vec![theme_dir.join(file_name)];
+        if let Some(ref dir) = exe_dir {
+            candidates.push(dir.join("themes").join(file_name));
+            candidates.push(dir.join("../share/lexlyrics/themes").join(file_name));
+            candidates.push(dir.join("../share/waylyrics/themes").join(file_name));
+        }
+        if let Some(preset_dir) = THEME_PRESETS_DIR {
+            candidates.push(PathBuf::from(preset_dir).join(file_name));
+        }
+        candidates.into_iter().find(|p| p.exists())
+    };
 
-    let theme_path = if user_theme.exists() {
-        user_theme
-    } else {
-        let Some(global_theme) = global_theme else {
-            anyhow::bail!("theme {theme_file_name} not found");
-        };
-        global_theme
+    let Some(theme_path) =
+        find_theme(&theme_file_name).or_else(|| find_theme("lexlyrics-karaoke.css"))
+    else {
+        anyhow::bail!("theme {theme_file_name} not found");
     };
 
     log::debug!("theme path: {:?}", theme_path);
@@ -359,6 +391,7 @@ fn register_actions(
     register_switch_passthrough(wind, &switch_passthrough);
     register_set_label(wind);
     register_reset_position(wind);
+    register_exit_fullscreen(wind);
     register_set_context_lines(wind);
     register_zoom(wind);
     register_reload_theme(app, wind, &reload_theme);

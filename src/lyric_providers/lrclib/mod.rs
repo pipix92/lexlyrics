@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::LazyLock;
 use std::time::Duration;
 
@@ -81,17 +82,42 @@ impl super::LyricProvider for LRCLib {
         } else {
             Some(artists.join(" / "))
         };
+        let first_artist = artists.first().map(|s| (*s).to_owned());
         let title = title.to_owned();
+        let clean_title = clean_search_title(&title);
 
         tokio_spawn!(async move {
-            let req = LRCLIB_API_CLIENT.search_lyrics_detailed(
-                &title,
-                artist.as_deref(),
-                album.as_deref(),
-            )?;
-            let resp = REQWEST_CLIENT.get(req.uri().to_string()).send().await?;
-            let result: Vec<LyricsData> = resp.json().await.map_err(|_| super::Error::NoResult)?;
-            Ok(map_lyrics_result(result))
+            let primary = fetch_lrclib_search(&title, artist.as_deref(), album.as_deref()).await;
+            let mut combined = match primary {
+                Ok(songs) => songs,
+                Err(err) if clean_title == title && album.is_none() => return Err(err),
+                Err(_) => Vec::new(),
+            };
+
+            if combined.len() < 2 || clean_title != title {
+                let fallback_title = if clean_title.is_empty() {
+                    &title
+                } else {
+                    &clean_title
+                };
+                if let Ok(extra) = fetch_lrclib_search(
+                    fallback_title,
+                    first_artist.as_deref().or(artist.as_deref()),
+                    None,
+                )
+                .await
+                {
+                    let mut seen: HashSet<String> =
+                        combined.iter().map(|s| s.id.clone()).collect();
+                    for song in extra {
+                        if seen.insert(song.id.clone()) {
+                            combined.push(song);
+                        }
+                    }
+                }
+            }
+
+            Ok(combined)
         })
         .await?
     }
@@ -131,6 +157,30 @@ fn verify_lyric(lyric: Option<&str>) -> Lyric<'_> {
     }
 }
 
+fn clean_search_title(title: &str) -> String {
+    static FEAT_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"(?i)\s*[\(\[]\s*(?:feat\.?|ft\.?|with|remaster(?:ed)?(?:\s+\d{4})?|original\s+mix|radio\s+edit|explicit|clean|deluxe|bonus\s+track)[^\)\]]*[\)\]]").unwrap()
+    });
+    static DASH_SUFFIX_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"(?i)\s+-\s+(?:original\s+mix|radio\s+edit|remaster(?:ed)?(?:\s+\d{4})?(?:\s+version)?|\d{4}\s+remaster(?:ed)?|single\s+version|album\s+version|extended(?:\s+mix|\s+version)?|club\s+mix|live(?:\s+.*)?|acoustic(?:\s+version)?|instrumental(?:\s+version)?|explicit|clean).*$").unwrap()
+    });
+
+    let no_feat = FEAT_RE.replace_all(title, "");
+    let cleaned = DASH_SUFFIX_RE.replace(&no_feat, "");
+    cleaned.trim().to_string()
+}
+
+async fn fetch_lrclib_search(
+    title: &str,
+    artist: Option<&str>,
+    album: Option<&str>,
+) -> Result<Vec<SongInfo>> {
+    let req = LRCLIB_API_CLIENT.search_lyrics_detailed(title, artist, album)?;
+    let resp = REQWEST_CLIENT.get(req.uri().to_string()).send().await?;
+    let result: Vec<LyricsData> = resp.json().await.map_err(|_| super::Error::NoResult)?;
+    Ok(map_lyrics_result(result))
+}
+
 fn map_lyrics_result(data: Vec<LyricsData>) -> Vec<SongInfo> {
     data.into_iter()
         .map(
@@ -152,4 +202,29 @@ fn map_lyrics_result(data: Vec<LyricsData>) -> Vec<SongInfo> {
             },
         )
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::clean_search_title;
+
+    #[test]
+    fn cleans_spotify_title_suffixes() {
+        assert_eq!(
+            clean_search_title("Scream Saver VIP - Original Mix"),
+            "Scream Saver VIP"
+        );
+        assert_eq!(
+            clean_search_title("Final Breath (feat. A Little Sound)"),
+            "Final Breath"
+        );
+        assert_eq!(
+            clean_search_title("Bohemian Rhapsody - Remastered 2011"),
+            "Bohemian Rhapsody"
+        );
+        assert_eq!(
+            clean_search_title("GodLovesUgly - Remix"),
+            "GodLovesUgly - Remix"
+        );
+    }
 }

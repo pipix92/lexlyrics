@@ -12,3 +12,4 @@ dhat.out.*
 # Release archives and packages
 *.deb
 *.tar.gz
+*.zip

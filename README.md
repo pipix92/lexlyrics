@@ -4,13 +4,15 @@
 
 # LexLyrics
 
-**Barra karaoke per il desktop Linux, con la traduzione italiana mentre la canzone suona.**
+**Barra karaoke in vetro per Linux e Windows, con traduzione italiana in tempo reale mentre la canzone suona.**
 
-Fork di [Waylyrics](https://github.com/waylyrics/waylyrics), sviluppato e testato su Debian 13 + COSMIC.
+Fork di [Waylyrics](https://github.com/waylyrics/waylyrics) — sviluppato su Debian 13 + COSMIC e disponibile anche come eseguibile portatile per Windows 10/11.
 
+<img src="https://img.shields.io/badge/version-0.6.0-0ea5e9" alt="v0.6.0" />
+<img src="https://img.shields.io/badge/platform-Linux%20%7C%20Windows-6366f1" alt="Linux | Windows" />
 <img src="https://img.shields.io/badge/Rust-2021-orange" alt="Rust" />
-<img src="https://img.shields.io/badge/GTK-4.18-blue" alt="GTK 4" />
-<img src="https://img.shields.io/badge/translation-NLLB--200%20%2B%20LLM-green" alt="NLLB-200 + LLM" />
+<img src="https://img.shields.io/badge/GTK-4-blue" alt="GTK 4" />
+<img src="https://img.shields.io/badge/AI-NLLB--200%20%2B%20LLM-10b981" alt="NLLB-200 + LLM" />
 <img src="https://img.shields.io/badge/license-MIT-lightgrey" alt="MIT" />
 
 </div>
@@ -38,42 +40,54 @@ Fork di [Waylyrics](https://github.com/waylyrics/waylyrics), sviluppato e testat
   </tr>
 </table>
 
-LexLyrics legge il brano in riproduzione via MPRIS (Spotify, browser, VLC, MPD…), scarica il testo sincronizzato e lo mostra in una barra sopra la dock:
+LexLyrics si aggancia automaticamente al player in riproduzione (**MPRIS** su Linux, **SMTC** su Windows: Spotify, browser, VLC, MPD, Apple Music, Foobar2000…), scarica il testo sincronizzato e lo mostra in tempo reale sopra la dock o la taskbar:
 
-- **riga precedente / successiva** in grigio (quante ne stanno, oppure un numero fisso);
-- **riga corrente** in bianco;
-- **traduzione italiana** in ciano, allineata alla stessa riga.
+- **righe precedenti / successive** in grigio soffuso (quante ne entrano nella barra, oppure un numero fisso);
+- **riga attiva** in bianco ad alto contrasto;
+- **traduzione italiana** in ciano sincronizzata sulla stessa battuta.
 
-Prima della prima strofa la barra mostra titolo e autore.
+Prima dell'inizio del cantato mostra una scheda pulita con **titolo e artista**, filtrando via i crediti sporchi (`作曲 : …`).
 
-## Funzionalità
+## Cosa rende unico LexLyrics (v0.6.0)
 
-- **Barra OSD**: barra senza bordi con sfondo vetro, sempre in primo piano, in basso al centro sopra la dock. Si **sposta trascinandola** e si **ridimensiona dai bordi e dagli angoli** come una finestra normale; posizione e dimensioni restano salvate.
-- **Zoom**: `Alt` + rotellina (o `Super` + rotellina) sopra la barra ingrandisce o riduce testo e barra insieme, tenendo fermo il centro in basso.
-- **Righe di contesto**: con `context-lines = -1` le righe grigie prima e dopo crescono con l'altezza della barra; altrimenti 0–8 fisse.
-- **Traduzione veloce**: NLLB-200 (600M) in locale, su GPU quando disponibile: le prime righe sono tradotte in meno di un secondo, a blocchi di 8.
-- **Traduzione rifinita**: subito dopo, un LLM (`agy`, `hermes` o `claude` da riga di comando) riscrive l'intera canzone in italiano naturale: gergo e parolacce con la stessa forza, modi di dire tradotti per significato. Il risultato va in cache, una volta per brano.
-- **Fonti dei testi**: LRCLib e NetEase. Se nessuno ha la versione sincronizzata, usa il testo semplice di LRCLib con tempi stimati sulla durata del brano. I crediti cinesi di NetEase (`作曲 : …`) vengono nascosti.
-- **Icona tray ♫**: clic sinistro: editor di tema e finestra. Clic destro: righe prima/dopo, barra OSD o HUD a schermo intero, più grande/più piccolo, riporta sopra la dock, click-through, player, ricerca testo.
-- **Click-through**: `Alt+P` o dal tray: i clic attraversano la barra, che diventa più tenue per segnalarlo.
-- **HUD a schermo intero**: alternativa alla barra: solo il testo sopra il desktop (`start-fullscreen = true`).
+- **Barra OSD compatta + HUD a schermo intero**:
+  - **Barra OSD** (predefinita): striscia senza bordi con effetto vetro sempre in primo piano. Si **trascina col mouse** e si **ridimensiona da bordi e angoli**; si adatta automaticamente se cambi monitor o scala HiDPI.
+  - **HUD a schermo intero**: solo il testo fluttuante sul desktop; tutto il resto dello schermo resta **sempre click-through** (non copre né blocca mai barra/dock) e con **`Esc` / `F11`** torni all'istante alla barra OSD.
+- **Zoom fluido**: `Alt` + rotellina (o `Super` + rotellina) ridimensiona insieme carattere e barra mantenendo fermo l'ancoraggio inferiore.
+- **Traduzione neurale a doppio stadio (0 MB VRAM a riposo)**:
+  1. **Istantanea (< 1 s)**: demone locale **NLLB-200 (600M)** multithread a blocchi di 8 righe. Sale su GPU quando apri LexLyrics, scende a `0 MB` di VRAM quando lo chiudi e passa da solo su CPU se la VRAM è occupata da un LLM locale.
+  2. **Rifinitura d'autore via LLM**: in background (`agy`, `hermes` o `claude`) riscrive l'intero brano in italiano naturale rispettando slang, metafore e intensità, salvando il risultato in cache una volta per tutte.
+  3. **Rilevamento italiano**: se la canzone è già in italiano, salta automaticamente la traduzione.
+- **Ricerca testi intelligente**: interroga **LRCLib** e **NetEase**, ripulisce i suffissi di Spotify (`- Original Mix`, `- Remastered`, `(feat. …)`), ordina i candidati per durata + somiglianza fuzzy e, se manca il file `.lrc` sincronizzato, distribuisce il testo semplice sulla durata del brano.
+- **Tray icon ♫ ed editor live**: su Linux clic sinistro apre l'editor TUI `lexlyrics-theme` (font, colori, opacità, raggio e vetro a caldo); clic destro su Linux e Windows controlla modalità finestra, zoom, click-through (`Alt+P`), player e ricerca testi.
+- **Multipiattaforma vero**: pacchetto nativo `.deb` / `.tar.gz` per Linux e archivio portatile `.zip` con `lexlyrics.exe` per Windows 10/11.
 
-### 🚧 Work in progress: altre lingue
+### Altre lingue di destinazione
 
-L'italiano è tradotto in locale. Le altre lingue di destinazione (`target_lang = "de"`, `"fr"`, `"es"`, `"ja"`… o i codici NLLB come `deu_Latn`) per ora passano da un'API esterna ([MyMemory](https://mymemory.translated.net/), gratuita: 5000 caratteri al giorno, 50000 impostando `api_email`). La traduzione locale per tutte le lingue arriverà in seguito.
+L'italiano (`ita_Latn`) viene tradotto interamente in locale con NLLB-200 + LLM. Impostando altre lingue (`de`, `fr`, `es`, `ja` o codici NLLB come `deu_Latn`), LexLyrics usa come fallback l'API gratuita [MyMemory](https://mymemory.translated.net/) (5 000 caratteri/giorno gratis, 50 000 con `api_email`).
 
-## Installazione
+---
 
-### Pacchetto Debian
+## Installazione rapida
+
+### Linux — Pacchetto Debian / Ubuntu / COSMIC
+
+Scarica il `.deb` dalle [Release](https://github.com/pipix92/lexlyrics/releases) oppure generalo in locale con Podman rootless:
 
 ```bash
-./scripts/package_deb.sh          # compila in un container Podman e crea il .deb
-sudo apt install ./lexlyrics_0.5.0-1_amd64.deb
+./scripts/package_deb.sh
+sudo apt install ./lexlyrics_0.6.0-1_amd64.deb
 ```
 
-Il pacchetto installa `lexlyrics`, l'editor `lexlyrics-theme`, i temi, le icone e lo schema GSettings.
+Installa `lexlyrics`, l'editor `lexlyrics-theme`, i temi, le icone e gli schemi GSettings. Su altre distribuzioni puoi estrarre `lexlyrics-v0.6.0-linux-x86_64.tar.gz` e lanciare direttamente `./lexlyrics`.
 
-### Da sorgente
+### Windows 10 / 11 (x64)
+
+1. Scarica **`lexlyrics-v0.6.0-windows-x86_64.zip`** dalle [Release](https://github.com/pipix92/lexlyrics/releases) (oppure generalo da Linux con `./scripts/package_windows.sh`).
+2. Estrai la cartella dove preferisci e avvia **`lexlyrics.exe`** (nessun installer richiesto: runtime GTK4, schemi e temi sono già inclusi).
+3. Per la traduzione locale offline anche su Windows: avvia `python contrib/nllb-translator/nllb-translation-server.py` (oppure usa `backend = "api"` in `%APPDATA%\waylyrics\waylyrics\config\config.toml`).
+
+### Compilazione da sorgente (Linux)
 
 ```bash
 sudo apt install libgtk-4-dev libdbus-1-dev libssl-dev libx11-dev
@@ -81,45 +95,50 @@ cargo build --release
 WAYLYRICS_THEME_PRESETS_DIR=$PWD/themes ./target/release/lexlyrics
 ```
 
-### Traduzione locale (consigliata)
+### Demone di traduzione NLLB-200 (`contrib/nllb-translator`)
 
-Il demone NLLB-200 è in [`contrib/nllb-translator`](contrib/nllb-translator/): occupa 0 MB di VRAM a riposo e sale su GPU in circa 0,7 s quando LexLyrics si avvia. Per la rifinitura serve uno tra `agy`, `hermes` o `claude` nel `PATH`; senza, resta la traduzione veloce (`refine_backend = "none"`).
+```bash
+cd contrib/nllb-translator
+./install.sh   # crea il venv, scarica facebook/nllb-200-distilled-600M e attiva il servizio systemd --user
+```
 
-> LexLyrics usa XWayland (`GDK_BACKEND=x11`) di default: evita un crash di GTK 4.18 sul Wayland di COSMIC ed è ciò che permette alla barra di posizionarsi da sola.
+Per la rifinitura testuale basta avere `agy`, `hermes` o `claude` nel `PATH` (altrimenti imposta `refine_backend = "none"`).
+
+> Su Linux LexLyrics imposta `GDK_BACKEND=x11` (XWayland) di default per evitare il bug DMABUF di GTK 4.18 su COSMIC e permettere il posizionamento millimetrico della barra OSD.
+
+---
 
 ## Configurazione
 
-`~/.config/waylyrics/config.toml`, oppure dall'editor (clic sinistro sull'icona ♫ o `lexlyrics-theme` da terminale).
+File `~/.config/waylyrics/config.toml` su Linux (`%APPDATA%\waylyrics\waylyrics\config\config.toml` su Windows), oppure tramite `lexlyrics-theme`:
 
 ```toml
 theme = "lexlyrics-karaoke"
-start-fullscreen = false      # barra OSD; true = HUD a schermo intero
+start-fullscreen = false      # false = Barra OSD compatta; true = HUD a schermo intero (Esc/F11 per uscire)
 window-width = 1200           # dimensioni della barra a zoom 1.0
 window-height = 210
-osd-dock-margin = 64          # distanza dal bordo inferiore
-lyric-offset-x = 0            # 0, 0 = sopra la dock in automatico
+osd-dock-margin = 64          # margine sopra la dock / taskbar
+lyric-offset-x = 0            # 0, 0 = centrato in basso in automatico
 lyric-offset-y = 0
 passthrough-by-default = false
-zoom = 1.0                    # 0.5 – 3.0, anche con Alt + rotellina
-context-lines = -1            # -1 = quante ne stanno, 0–8 fisse
+zoom = 1.0                    # 0.5 – 3.0 (anche con Alt + rotellina)
+context-lines = -1            # -1 = automatico in base all'altezza, oppure 0–8 fisse
 lyric-search-source = ["LRCLib", "网易云音乐"]
 
 [translation]
 backend = "nllb"              # nllb | marian | agy | claude | hermes | api
 nllb_url = "http://127.0.0.1:18436/translate"
-target_lang = "ita_Latn"      # italiano in locale; altre lingue via API (WIP)
+target_lang = "ita_Latn"      # italiano offline; altre lingue via API
 refine_backend = "agy"        # agy | hermes | claude | none
 refine_timeout_s = 180
 api_url = "https://api.mymemory.translated.net/get"
 api_email = ""
 ```
 
-L'editor `lexlyrics-theme` genera `~/.local/share/waylyrics/_themes/lexlyrics-custom.css` (font, dimensioni, colori di originale e traduzione, opacità delle righe vicine, vetro, angoli e bordo della barra) e lo ricarica a caldo.
+## Crediti e Licenza
 
-## Crediti
-
-- [Waylyrics](https://github.com/waylyrics/waylyrics) di poly000 e contributori, base di questo fork.
-- [LRCLib](https://lrclib.net/) e NetEase per i testi, [NLLB-200](https://ai.meta.com/research/no-language-left-behind/) di Meta per la traduzione locale.
+- Basato su [Waylyrics](https://github.com/waylyrics/waylyrics) di poly000 e contributori.
+- Testi da [LRCLib](https://lrclib.net/) e NetEase; traduzione neurale offline tramite [Meta NLLB-200](https://ai.meta.com/research/no-language-left-behind/).
 - Sfondo degli screenshot: Nebulosa di Orione, NASA/ESA (dominio pubblico).
 
-Licenza **MIT**, come il progetto originale: vedi [LICENSE](LICENSE).
+Rilasciato sotto licenza **MIT** — vedi [LICENSE](LICENSE).

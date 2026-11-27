@@ -106,13 +106,20 @@ pub fn register_reset_position(wind: &Window) {
         #[weak]
         wind,
         move |_, _| {
-            if wind.is_fullscreen() {
+            if wind.has_css_class("hud-mode") {
                 if let Some(lyrics_box) = wind.child().and_downcast::<gtk::Box>() {
                     lyrics_box.set_halign(wind.imp().lyric_align.get().into());
                     lyrics_box.set_valign(gtk::Align::End);
+                    lyrics_box.set_margin_bottom(52);
                     lyrics_box.set_margin_start(0);
                     lyrics_box.set_margin_top(0);
                 }
+                let win_weak = wind.downgrade();
+                glib::idle_add_local_once(move || {
+                    if let Some(win) = win_weak.upgrade() {
+                        set_click_pass_through(&win, win.imp().clickthrough.get());
+                    }
+                });
             } else {
                 let (x, y) = osd::bottom_center(
                     &wind,
@@ -128,6 +135,38 @@ pub fn register_reset_position(wind: &Window) {
         }
     ));
     wind.add_action(&action);
+}
+
+/// Escape / F11 safety hatch: exit Fullscreen HUD back to the Compact OSD Bar.
+pub fn register_exit_fullscreen(wind: &Window) {
+    let action = SimpleAction::new("exit-fullscreen", None);
+    action.connect_activate(clone!(
+        #[weak]
+        wind,
+        move |_, _| {
+            if !wind.has_css_class("hud-mode") {
+                return;
+            }
+            crate::config::save_bool("start-fullscreen", false);
+            crate::config::save_lyric_offset(0, 0);
+            if let Ok(exe) = std::env::current_exe() {
+                #[cfg(windows)]
+                {
+                    let _ = std::process::Command::new(&exe).spawn();
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = std::process::Command::new("sh")
+                        .arg("-c")
+                        .arg(format!("sleep 0.6 && \"{}\"", exe.display()))
+                        .spawn();
+                }
+            }
+            wind.close();
+        }
+    ));
+    wind.add_action(&action);
+    bind_shortcut("win.exit-fullscreen", wind, "Escape|F11");
 }
 
 /// How many grey lines to show around the current one (-1 = as many as fit).

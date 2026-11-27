@@ -16,12 +16,10 @@ import threading
 import subprocess
 
 # Force 100% offline mode - do not contact HuggingFace Hub
-# (override with TRANSFORMERS_OFFLINE=0 HF_HUB_OFFLINE=0 for the first run,
-# to download the model once)
-os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
-os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
+os.environ["HF_HUB_OFFLINE"] = "1"
 
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import HTTPServer, ThreadingHTTPServer, BaseHTTPRequestHandler
 import torch
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 
@@ -41,6 +39,10 @@ model = None
 current_device = "cpu"
 last_activity_time = 0.0
 model_lock = threading.Lock()
+# Dopo un OOM CUDA (es. un llama-server occupa la VRAM) si resta su CPU per
+# GPU_RETRY_S secondi invece di riprovare ogni 3 s: la traduzione non fallisce mai.
+GPU_RETRY_S = 60.0
+gpu_blocked_until = 0.0
 
 stats = {
     "status": "initializing",
@@ -66,9 +68,11 @@ def is_waylyrics_running() -> bool:
 
 
 def ensure_device(target_device: str):
-    global model, current_device, stats
+    global model, current_device, stats, gpu_blocked_until
     if not CUDA_AVAILABLE and target_device == "cuda":
         return
+    if target_device == "cuda" and time.time() < gpu_blocked_until:
+        return  # VRAM piena di recente: si resta su CPU
 
     with model_lock:
         if current_device == target_device:
@@ -77,7 +81,15 @@ def ensure_device(target_device: str):
         t0 = time.time()
         if target_device == "cuda":
             logger.info("Promoting NLLB-200: CPU RAM -> GPU VRAM (RTX 3050)...")
-            model.to("cuda")
+            try:
+                model.to("cuda")
+            except torch.cuda.OutOfMemoryError:
+                # .to() puo' fallire a meta': si riporta TUTTO su CPU
+                model.to("cpu")
+                torch.cuda.empty_cache()
+                gpu_blocked_until = time.time() + GPU_RETRY_S
+                logger.warning(f"VRAM insufficiente: NLLB resta su CPU, nuovo tentativo GPU tra {GPU_RETRY_S:.0f}s")
+                return
             current_device = "cuda"
             stats["tier"] = "vram"
             stats["device"] = "cuda"
@@ -163,11 +175,12 @@ def translate_lines(lines: list[str], tgt_lang: str = "ita_Latn", src_lang: str 
         if src_lang and hasattr(tokenizer, "src_lang"):
             tokenizer.src_lang = src_lang
         inputs = tokenizer(batch_texts, return_tensors="pt", padding=True, truncation=True, max_length=512).to(dev)
+        max_new_tokens = min(128, max(24, int(inputs["input_ids"].shape[1] * 2.2)))
         with torch.no_grad():
             translated_tokens = model.generate(
                 **inputs,
                 forced_bos_token_id=tgt_id,
-                max_length=512,
+                max_new_tokens=max_new_tokens,
                 num_beams=1
             )
         translated_texts = [tokenizer.decode(t, skip_special_tokens=True) for t in translated_tokens]
@@ -193,6 +206,12 @@ class TranslationHandler(BaseHTTPRequestHandler):
         if "GET /health" in args[0] or "GET /status" in args[0]:
             return
         super().log_message(format, *args)
+
+    def _safe_write(self, data: bytes):
+        try:
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
     def do_OPTIONS(self):
         self.send_response(200)
@@ -223,7 +242,7 @@ class TranslationHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
-            self.wfile.write(json.dumps(resp_data).encode("utf-8"))
+            self._safe_write(json.dumps(resp_data).encode("utf-8"))
         elif self.path == "/wake":
             # Explicit wake up / pre-warm to GPU
             ensure_device("cuda")
@@ -231,7 +250,7 @@ class TranslationHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
-            self.wfile.write(b'{"status":"promoted_to_vram"}')
+            self._safe_write(b'{"status":"promoted_to_vram"}')
         else:
             self.send_response(404)
             self.send_header("Access-Control-Allow-Origin", "*")
@@ -266,14 +285,14 @@ class TranslationHandler(BaseHTTPRequestHandler):
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Access-Control-Allow-Origin", "*")
                 self.end_headers()
-                self.wfile.write(json.dumps(resp_data).encode("utf-8"))
+                self._safe_write(json.dumps(resp_data).encode("utf-8"))
             except Exception as e:
                 logger.error(f"Error handling translation: {e}")
                 self.send_response(500)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Access-Control-Allow-Origin", "*")
                 self.end_headers()
-                self.wfile.write(json.dumps({"error": str(e)}).encode("utf-8"))
+                self._safe_write(json.dumps({"error": str(e)}).encode("utf-8"))
         else:
             self.send_response(404)
             self.send_header("Access-Control-Allow-Origin", "*")
@@ -286,7 +305,7 @@ def run_server():
     t = threading.Thread(target=vram_manager_loop, daemon=True)
     t.start()
 
-    server = HTTPServer(("127.0.0.1", PORT), TranslationHandler)
+    server = ThreadingHTTPServer(("127.0.0.1", PORT), TranslationHandler)
     logger.info(f"NLLB-200 Server ready at http://127.0.0.1:{PORT}")
     try:
         server.serve_forever()

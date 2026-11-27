@@ -11,6 +11,16 @@ use super::window;
 pub(super) fn set_click_pass_through(window: &window::Window, enabled: bool) {
     use std::ffi::c_void;
 
+    if enabled {
+        window.add_css_class("passthrough");
+    } else {
+        window.remove_css_class("passthrough");
+    }
+
+    // In Fullscreen HUD mode on Windows, keep the fullscreen surface transparent
+    // to mouse clicks so it never blocks the desktop or taskbar.
+    let pass = enabled || window.has_css_class("hud-mode");
+
     fn set_window_click_through(hwnd: *mut c_void, enabled: bool) {
         use windows::Win32::Foundation::HWND;
         use windows::Win32::UI::WindowsAndMessaging::{
@@ -44,7 +54,7 @@ pub(super) fn set_click_pass_through(window: &window::Window, enabled: bool) {
 
     let handle = surface.handle().0;
 
-    set_window_click_through(handle, enabled);
+    set_window_click_through(handle, pass);
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -66,11 +76,8 @@ pub(super) fn set_click_pass_through(window: &window::Window, enabled: bool) {
 
     if enabled {
         if !window.is_decorated() {
-            // https://github.com/lianchengwu/wmplayer-lyric/blob/158d66e1800ce535414f2758c5f8290ea3e87f2d/osdlyric/osd_lyrics_lib.c#L943-L959
-            // Empty input region will imply that we don't handle any mouse event.
-            surface.set_input_region(Some(&Region::create_rectangle(&RectangleInt::new(
-                0, 0, 1, 1,
-            ))));
+            // Empty input region passes 100% of mouse events straight through.
+            surface.set_input_region(Some(&Region::create()));
         } else {
             let headerbar = &window.imp().headerbar;
             let allocation = headerbar.allocation();
@@ -81,6 +88,27 @@ pub(super) fn set_click_pass_through(window: &window::Window, enabled: bool) {
                 allocation.width(),
                 allocation.height(),
             ))));
+        }
+    } else if window.has_css_class("hud-mode") {
+        // Fullscreen HUD covers the whole monitor with a transparent surface:
+        // NEVER capture mouse clicks outside `#lyrics-box`, otherwise the
+        // invisible fullscreen surface blocks the entire desktop, dock, and tray.
+        let rect = window
+            .child()
+            .and_then(|lyrics_box| lyrics_box.compute_bounds(window))
+            .filter(|b| b.width() >= 2.0 && b.height() >= 2.0)
+            .map(|b| {
+                RectangleInt::new(
+                    (b.x().floor() as i32 - 4).max(0),
+                    (b.y().floor() as i32 - 4).max(0),
+                    b.width().ceil() as i32 + 8,
+                    b.height().ceil() as i32 + 8,
+                )
+            });
+
+        match rect {
+            Some(r) => surface.set_input_region(Some(&Region::create_rectangle(&r))),
+            None => surface.set_input_region(Some(&Region::create())),
         }
     } else {
         surface.set_input_region(Some(&Region::create_rectangle(&RectangleInt::new(

@@ -1,4 +1,7 @@
-use crate::sync::utils::distance;
+use std::time::Duration;
+
+use crate::lyric_providers::SongInfo;
+use crate::sync::utils::{distance, rank_likely_lyrics};
 
 fn str_distance<A: AsRef<str>, B: AsRef<str>>(a: A, b: B) -> f64 {
     let a = a.as_ref().chars().collect::<Vec<_>>();
@@ -50,4 +53,45 @@ fn unicode_distance() {
         str_distance("初音未来的消失", "初音ミクの消失")
             > str_distance("初音未来的消失", "完全不同的歌曲")
     );
+}
+
+#[test]
+fn ranks_multiple_candidates_by_duration_and_similarity() {
+    let songs = vec![
+        SongInfo {
+            id: "wrong-len".into(),
+            title: "Scream Saver VIP".into(),
+            singer: "Other Artist".into(),
+            album: Some("Other Album".into()),
+            length: Duration::from_secs(240),
+        },
+        SongInfo {
+            id: "best-match".into(),
+            title: "Scream Saver VIP".into(),
+            singer: "Subtronics".into(),
+            album: Some("Scream Saver".into()),
+            length: Duration::from_secs(181),
+        },
+        SongInfo {
+            id: "second-match".into(),
+            title: "Scream Saver".into(),
+            singer: "Subtronics".into(),
+            album: None,
+            length: Duration::from_secs(180),
+        },
+    ];
+
+    let ranked = rank_likely_lyrics(
+        Some("Scream Saver"),
+        "Scream Saver VIP",
+        Some("Subtronics"),
+        Some(Duration::from_secs(180)),
+        &songs,
+        2000,
+    );
+
+    assert_eq!(ranked.len(), 3);
+    assert_eq!(ranked[0], ("best-match", 0));
+    assert_eq!(ranked[1], ("second-match", 0));
+    assert_eq!(ranked[2], ("wrong-len", 2));
 }

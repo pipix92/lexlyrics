@@ -501,8 +501,12 @@ class TUI:
         opts = ["Barra OSD compatta (consigliata)", "HUD schermo intero"]
         r = self.menu("Modalità finestra", opts, opts[1] if self.win("start-fullscreen") else opts[0])
         if r:
-            set_config("start-fullscreen", r == opts[1])
-            self.changed_window("Modalità")
+            new_fs = (r == opts[1])
+            if new_fs != self.win("start-fullscreen"):
+                set_config("start-fullscreen", new_fs)
+                set_config("lyric-offset-x", 0)
+                set_config("lyric-offset-y", 0)
+                self.changed_window("Modalità")
 
     def pick_window_int(self, key, label, lo, hi):
         s = self.prompt(f"{label} ({lo}-{hi})", str(self.win(key)))

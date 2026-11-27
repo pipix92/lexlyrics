@@ -73,6 +73,13 @@ pub async fn translate_missing(cache: bool) {
         return;
     }
 
+    if crate::translation::is_italian(&config.target_lang)
+        && crate::translation::is_likely_italian_lyrics(&unique)
+    {
+        info!("lyrics are already in Italian, skipping translation");
+        return;
+    }
+
     if !has_translation {
         if !quick_pass(config, &origin, &unique).await {
             return;

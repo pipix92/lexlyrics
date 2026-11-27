@@ -74,42 +74,53 @@ pub fn build_main_window(
     // Two window modes: the compact OSD bar (default) is a small borderless
     // strip living above the dock, the fullscreen HUD covers the whole screen
     // and places the lyrics inside it.
+    let mon = osd::monitor_geometry(&window);
     let zoom = zoom.clamp(zoom::MIN_ZOOM, zoom::MAX_ZOOM);
     let osd_base_size = (
         window_width.unwrap_or(OSD_DEFAULT_SIZE.0),
         window_height.unwrap_or(OSD_DEFAULT_SIZE.1),
     );
     window.imp().osd_base_size.set(osd_base_size);
+    let min_width = OSD_MIN_WIDTH.min(mon.width());
     let (osd_width, osd_height) = (
-        zoom::scaled(osd_base_size.0, zoom),
-        zoom::scaled(osd_base_size.1, zoom).max(WINDOW_MIN_HEIGHT),
+        zoom::scaled(osd_base_size.0, zoom)
+            .clamp(min_width, (mon.width() - 32).max(min_width)),
+        zoom::scaled(osd_base_size.1, zoom)
+            .clamp(WINDOW_MIN_HEIGHT, (mon.height() - 64).max(WINDOW_MIN_HEIGHT)),
     );
 
     if start_fullscreen {
         window.add_css_class("hud-mode");
-        window.fullscreen();
         window.set_decorated(false);
+        window.set_default_size(mon.width(), mon.height());
     } else {
         window.add_css_class("osd-mode");
         window.set_decorated(false);
         window.set_default_size(osd_width, osd_height);
-        window.set_size_request(320, WINDOW_MIN_HEIGHT);
+        window.set_size_request(min_width, WINDOW_MIN_HEIGHT);
     }
 
     window.set_title(Some(DEFAULT_TEXT));
     window.set_icon_name(Some(crate::APP_ID_FIXED));
 
+    gtk::prelude::WidgetExt::realize(&window);
     if skip_taskbar {
-        gtk::prelude::WidgetExt::realize(&window);
         set_skip_taskbar(&window, true);
     }
 
-    if !start_fullscreen {
-        gtk::prelude::WidgetExt::realize(&window);
-        osd::make_unmanaged(&window);
+    // On X11/XWayland, use an unmanaged (override-redirect) overlay in BOTH
+    // OSD and Fullscreen HUD modes so the compositor never enters exclusive
+    // fullscreen mode (hiding the COSMIC top panel, tray icon, and dock).
+    let unmanaged = osd::make_unmanaged(&window);
+    if start_fullscreen && !unmanaged {
+        window.fullscreen();
     }
 
     window.present();
+
+    if start_fullscreen && unmanaged {
+        osd::place(&window, mon.x(), mon.y());
+    }
 
     let prev_label = Label::builder()
         .label("")
@@ -182,13 +193,30 @@ pub fn build_main_window(
     window.set_child(Some(&verical_box));
 
     if start_fullscreen {
-        if lyric_offset_x > 0 || lyric_offset_y > 0 {
+        let offset_fits = (lyric_offset_x > 0 || lyric_offset_y > 0)
+            && lyric_offset_x < (mon.width() - 160).max(1)
+            && lyric_offset_y < (mon.height() - 100).max(1);
+        if offset_fits {
             verical_box.set_halign(gtk::Align::Start);
             verical_box.set_valign(gtk::Align::Start);
             verical_box.set_margin_start(lyric_offset_x);
             verical_box.set_margin_top(lyric_offset_y);
         }
-        setup_hud_drag(&verical_box);
+        setup_hud_drag(&window, &verical_box);
+
+        // Refresh the HUD's tight input-region box whenever any label text or
+        // visibility changes, with zero idle wakeups.
+        for label in [&prev_label, &above_label, &below_label, &next_label] {
+            let win_weak = window.downgrade();
+            label.connect_label_notify(move |_| {
+                let win_weak = win_weak.clone();
+                gtk::glib::idle_add_local_once(move || {
+                    if let Some(win) = win_weak.upgrade() {
+                        set_click_pass_through(&win, win.imp().clickthrough.get());
+                    }
+                });
+            });
+        }
     } else {
         place_osd_window(
             &window,
@@ -238,7 +266,7 @@ fn place_osd_window(
 ) {
     let pinned = saved_x > 0 || saved_y > 0;
     let target = if pinned {
-        (saved_x, saved_y)
+        osd::clamp_to_monitor(window, saved_x, saved_y, width, height)
     } else {
         osd::bottom_center(window, width, height, dock_margin)
     };
@@ -252,10 +280,6 @@ fn place_osd_window(
 fn move_modifier_held(state: gtk::gdk::ModifierType) -> bool {
     use gtk::gdk::ModifierType;
     state.intersects(ModifierType::ALT_MASK | ModifierType::SUPER_MASK | ModifierType::META_MASK)
-}
-
-fn alt_held(gesture: &gtk::GestureDrag) -> bool {
-    move_modifier_held(gesture.current_event_state())
 }
 
 /// how close to the border, in pixels, a press resizes the OSD bar instead of
@@ -418,10 +442,14 @@ fn setup_osd_drag(window: &Window) {
             };
 
             let (x, y, width, height) = drag.geometry_for(pointer_x, pointer_y);
-            if let OsdDrag::Resize { .. } = drag {
+            let (w, h) = if let OsdDrag::Resize { .. } = drag {
                 window.set_default_size(width, height);
-            }
-            osd::place(&window, x, y);
+                (width, height)
+            } else {
+                (window.width(), window.height())
+            };
+            let (cx, cy) = osd::clamp_to_monitor(&window, x, y, w, h);
+            osd::place(&window, cx, cy);
         }
     });
 
@@ -465,53 +493,69 @@ fn setup_osd_drag(window: &Window) {
     window.add_controller(drag);
 }
 
-/// `Alt` + mouse drag moves the lyrics inside the fullscreen HUD, and the
-/// offsets are written back to `config.toml`.
-fn setup_hud_drag(lyrics_box: &gtk::Box) {
+/// Drag `#lyrics-box` directly (plain drag or `Alt`+drag) inside the
+/// fullscreen HUD; only `#lyrics-box` receives mouse input while the rest of
+/// the screen stays click-through.
+fn setup_hud_drag(window: &Window, lyrics_box: &gtk::Box) {
     let drag = gtk::GestureDrag::new();
     let start = Rc::new(Cell::new((0i32, 0i32)));
 
     drag.connect_drag_begin({
         let start = start.clone();
+        let window = window.downgrade();
         let lyrics_box = lyrics_box.downgrade();
-        move |gesture, _, _| {
-            if !alt_held(gesture) {
+        move |_, _, _| {
+            let (Some(window), Some(lyrics_box)) = (window.upgrade(), lyrics_box.upgrade()) else {
                 return;
-            }
-            if let Some(lyrics_box) = lyrics_box.upgrade() {
-                start.set((lyrics_box.margin_start(), lyrics_box.margin_top()));
-            }
+            };
+            let (bx, by) = lyrics_box
+                .compute_bounds(&window)
+                .map(|b| (b.x().round() as i32, b.y().round() as i32))
+                .unwrap_or_else(|| (lyrics_box.margin_start(), lyrics_box.margin_top()));
+            start.set((bx.max(0), by.max(0)));
         }
     });
 
     drag.connect_drag_update({
         let start = start.clone();
+        let window = window.downgrade();
         let lyrics_box = lyrics_box.downgrade();
-        move |gesture, offset_x, offset_y| {
-            if !alt_held(gesture) {
-                return;
-            }
-            let Some(lyrics_box) = lyrics_box.upgrade() else {
+        move |_, offset_x, offset_y| {
+            let (Some(window), Some(lyrics_box)) = (window.upgrade(), lyrics_box.upgrade()) else {
                 return;
             };
 
             let (init_x, init_y) = start.get();
+            let (bw, bh) = (lyrics_box.width().max(80), lyrics_box.height().max(40));
+            let max_x = (window.width() - bw).max(0);
+            let max_y = (window.height() - bh).max(0);
+            let nx = (init_x + offset_x as i32).clamp(0, max_x);
+            let ny = (init_y + offset_y as i32).clamp(0, max_y);
+
             lyrics_box.set_halign(gtk::Align::Start);
             lyrics_box.set_valign(gtk::Align::Start);
-            lyrics_box.set_margin_start((init_x + offset_x as i32).max(0));
-            lyrics_box.set_margin_top((init_y + offset_y as i32).max(0));
+            lyrics_box.set_margin_bottom(0);
+            lyrics_box.set_margin_start(nx);
+            lyrics_box.set_margin_top(ny);
+
+            let win_weak = window.downgrade();
+            gtk::glib::idle_add_local_once(move || {
+                if let Some(win) = win_weak.upgrade() {
+                    set_click_pass_through(&win, win.imp().clickthrough.get());
+                }
+            });
         }
     });
 
     drag.connect_drag_end({
+        let window = window.downgrade();
         let lyrics_box = lyrics_box.downgrade();
-        move |gesture, _, _| {
-            if !alt_held(gesture) {
+        move |_, _, _| {
+            let (Some(window), Some(lyrics_box)) = (window.upgrade(), lyrics_box.upgrade()) else {
                 return;
-            }
-            if let Some(lyrics_box) = lyrics_box.upgrade() {
-                config::save_lyric_offset(lyrics_box.margin_start(), lyrics_box.margin_top());
-            }
+            };
+            config::save_lyric_offset(lyrics_box.margin_start(), lyrics_box.margin_top());
+            set_click_pass_through(&window, window.imp().clickthrough.get());
         }
     });
 
